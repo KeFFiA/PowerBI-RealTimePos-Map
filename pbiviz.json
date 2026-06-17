@@ -4,7 +4,7 @@
         "displayName": "Aircraft Map Visual",
         "guid": "aircraftMapVisual8C9D26668F284C4D877271309FED1833",
         "visualClassName": "Visual",
-        "version": "1.0.29.7",
+        "version": "1.0.29.9",
         "description": "Production-ready aircraft map visual with custom SVG markers, per-object colors, selected-field tooltips, localization and area selection.",
         "supportUrl": "https://example.com/support",
         "gitHubUrl": ""

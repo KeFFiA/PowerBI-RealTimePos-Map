@@ -1,6 +1,6 @@
 {
     "name": "aircraft-map-visual",
-    "version": "1.0.29.7",
+    "version": "1.0.29.9",
     "description": "Production-ready aircraft map visual for Power BI with custom SVG markers, per-object colors, selected-field tooltips, localization and area selection.",
     "scripts": {
         "start": "pbiviz start",

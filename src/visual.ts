@@ -24,7 +24,7 @@ import FormattingModel = powerbi.visuals.FormattingModel;
 import { VisualSettingsModel } from "./settings";
 import { AircraftPoint, transform } from "./dataModel";
 import { MapController, MapStyle } from "./map";
-import { MarkerLayer } from "./markers";
+import { MarkerLayer, ClusterTooltipGroup } from "./markers";
 import { AreaSelection } from "./selection";
 
 export class Visual implements IVisual {
@@ -175,6 +175,7 @@ export class Visual implements IVisual {
         this.markerLayer.render(this.points, this.settings, {
             onClick: (point, ev) => this.onPointClick(point, ev),
             onMouseOver: (point, position) => this.showTooltip(point, position),
+            onClusterOver: (groups, position) => this.showClusterTooltip(groups, position),
             onMouseOut: () => this.tooltipService.hide({ immediately: true, isTouchEvent: false }),
         });
         this.areaSelection.setPoints(this.points);
@@ -290,6 +291,33 @@ export class Visual implements IVisual {
             coordinates: [position.x, position.y],
             dataItems,
             identities: [point.selectionId],
+            isTouchEvent: false,
+        });
+    }
+
+    /** Cluster hover tooltip: one row per airline (count) listing its aircraft. */
+    private showClusterTooltip(groups: ClusterTooltipGroup[], position: { x: number; y: number }): void {
+        const MAX_ROWS = 20;
+        const MAX_NAMES = 10;
+        const total = groups.reduce((sum, g) => sum + g.total, 0);
+        const dataItems: powerbi.extensibility.VisualTooltipDataItem[] = [
+            { displayName: "Aircraft", value: String(total) },
+        ];
+        for (const g of groups.slice(0, MAX_ROWS)) {
+            const names = g.aircraft.slice(0, MAX_NAMES);
+            const extra = g.total - names.length;
+            dataItems.push({
+                displayName: `${g.airline} (${g.total})`,
+                value: names.join(", ") + (extra > 0 ? `, +${extra}` : ""),
+            });
+        }
+        if (groups.length > MAX_ROWS) {
+            dataItems.push({ displayName: "…", value: `+${groups.length - MAX_ROWS} airlines` });
+        }
+        this.tooltipService.show({
+            coordinates: [position.x, position.y],
+            dataItems,
+            identities: [],
             isTouchEvent: false,
         });
     }

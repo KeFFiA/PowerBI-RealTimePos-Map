@@ -19,11 +19,20 @@ import { AircraftPoint } from "./dataModel";
 import { VisualSettingsModel, DEFAULT_AIRCRAFT_TYPE } from "./settings";
 import { AIRCRAFT_ICONS, AircraftIcon } from "./aircraftIcons";
 
+/** Aircraft of one airline inside a hovered cluster. */
+export interface ClusterTooltipGroup {
+    airline: string;
+    aircraft: string[];
+    total: number;
+}
+
 export interface MarkerCallbacks {
     onClick: (point: AircraftPoint, event: MouseEvent) => void;
     /** position is the plane's location in container (viewport) pixels, for tooltip anchoring. */
     onMouseOver: (point: AircraftPoint, position: { x: number; y: number }) => void;
-    onMouseOut: (point: AircraftPoint) => void;
+    /** Hovering a cluster: aircraft grouped by airline, for a summary tooltip. */
+    onClusterOver: (groups: ClusterTooltipGroup[], position: { x: number; y: number }) => void;
+    onMouseOut: () => void;
 }
 
 export interface MarkerHit {
@@ -66,7 +75,6 @@ interface ImageEntry {
     ready: boolean;
 }
 
-const MAX_INDIVIDUAL_MARKERS = 300;
 const CANVAS_PADDING = 0.1;
 const LABEL_HEIGHT = 16;
 
@@ -159,7 +167,7 @@ export class MarkerLayer {
 
     private origin: L.Point = L.point(0, 0);
     private hitItems: HitItem[] = [];
-    private hovered: AircraftPoint | null = null;
+    private hoveredKey: string | null = null;
     private drawScheduled = false;
 
     private readonly iconCache: Map<string, ImageEntry> = new Map();
@@ -339,10 +347,10 @@ export class MarkerLayer {
             return;
         }
 
-        // No filtering: cluster dense areas (and always when too many planes are in view).
+        // No filtering: cluster dense areas only up to the configured zoom. Above it
+        // every aircraft is drawn individually, regardless of how many are in view.
         const clusterMaxZoom = clamp(Number(settings.behavior.clusterMaxZoom.value) || 0, 0, 19);
-        const tooMany = instances.length > MAX_INDIVIDUAL_MARKERS;
-        if (settings.behavior.cluster.value && (this.map.getZoom() <= clusterMaxZoom || tooMany)) {
+        if (settings.behavior.cluster.value && this.map.getZoom() <= clusterMaxZoom) {
             const radius = clamp(Number(settings.behavior.clusterRadius.value) || 45, 20, 200);
             for (const cluster of this.clusterPoints(instances, radius)) {
                 if (cluster.instances.length === 1) {
@@ -638,25 +646,54 @@ export class MarkerLayer {
             return;
         }
         const hit = this.hitTest(e.layerPoint);
-        const point = hit && hit.kind === "marker" ? hit.point! : null;
-        if (point) {
-            if (this.hovered !== point) {
-                this.hovered = point;
-                const cp = this.map.layerPointToContainerPoint(L.point(hit!.x, hit!.y));
-                this.callbacks.onMouseOver(point, { x: cp.x, y: cp.y });
+        if (hit && hit.kind === "marker" && hit.point) {
+            const key = `m${hit.point.index}`;
+            if (this.hoveredKey !== key) {
+                this.hoveredKey = key;
+                const cp = this.map.layerPointToContainerPoint(L.point(hit.x, hit.y));
+                this.callbacks.onMouseOver(hit.point, { x: cp.x, y: cp.y });
             }
-        } else if (this.hovered) {
-            const prev = this.hovered;
-            this.hovered = null;
-            this.callbacks.onMouseOut(prev);
+        } else if (hit && hit.kind === "cluster" && hit.cluster) {
+            const key = `c${Math.round(hit.x)}_${Math.round(hit.y)}`;
+            if (this.hoveredKey !== key) {
+                this.hoveredKey = key;
+                const cp = this.map.layerPointToContainerPoint(L.point(hit.x, hit.y));
+                this.callbacks.onClusterOver(this.buildClusterGroups(hit.cluster), { x: cp.x, y: cp.y });
+            }
+        } else if (this.hoveredKey) {
+            this.hoveredKey = null;
+            this.callbacks.onMouseOut();
         }
     }
 
     private onMapMouseOut(): void {
-        if (this.hovered && this.callbacks) {
-            const prev = this.hovered;
-            this.hovered = null;
-            this.callbacks.onMouseOut(prev);
+        if (this.hoveredKey && this.callbacks) {
+            this.hoveredKey = null;
+            this.callbacks.onMouseOut();
         }
+    }
+
+    /** Aircraft of a cluster grouped by airline (point.group), busiest airline first. */
+    private buildClusterGroups(cluster: Cluster): ClusterTooltipGroup[] {
+        const byAirline = new Map<string, string[]>();
+        const seen = new Set<number>();
+        for (const inst of cluster.instances) {
+            const p = inst.point;
+            if (seen.has(p.index)) {
+                continue;
+            }
+            seen.add(p.index);
+            const airline = p.group && p.group.length ? p.group : "—";
+            let list = byAirline.get(airline);
+            if (!list) {
+                list = [];
+                byAirline.set(airline, list);
+            }
+            list.push(p.label || p.id);
+        }
+        const groups: ClusterTooltipGroup[] = [];
+        byAirline.forEach((aircraft, airline) => groups.push({ airline, aircraft, total: aircraft.length }));
+        groups.sort((a, b) => b.total - a.total);
+        return groups;
     }
 }
