@@ -109,10 +109,21 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
     const groupSelectionById = new Map<string, ISelectionId>();
 
     // Tooltip columns can come from either categories or values (role "tooltips").
+    // The tooltips role is bound in both selects (to accept grouping and measure
+    // fields), so the same field can surface twice — dedupe by query name so a
+    // field added once (or also used as the color group) shows a single row.
+    const seenTooltip = new Set<string>();
     const tooltipCols = [
         ...categories.filter((c) => hasRole(c.source, "tooltips")),
         ...values.filter((v) => hasRole(v.source, "tooltips")),
-    ];
+    ].filter((col) => {
+        const key = col.source.queryName || col.source.displayName;
+        if (seenTooltip.has(key)) {
+            return false;
+        }
+        seenTooltip.add(key);
+        return true;
+    });
 
     const defaultColor = settings.marker.color.value.value;
     const count = categoryCol.values.length;
