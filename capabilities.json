@@ -1,0 +1,1115 @@
+{
+  "supportsKeyboardFocus": true,
+  "supportsLandingPage": true,
+  "supportsEmptyDataView": true,
+  "privileges": [
+    {
+      "name": "WebAccess",
+      "essential": true,
+      "parameters": [
+        "https://*.basemaps.cartocdn.com/*",
+        "https://*.tile.openstreetmap.org/*",
+        "*"
+      ]
+    }
+  ],
+  "dataRoles": [
+    {
+      "displayName": "ID / object name",
+      "displayNameKey": "Role_Category",
+      "name": "category",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Time / timestamp",
+      "displayNameKey": "Role_Timestamp",
+      "name": "timestamp",
+      "kind": "GroupingOrMeasure"
+    },
+    {
+      "displayName": "Latitude",
+      "displayNameKey": "Role_Latitude",
+      "name": "latitude",
+      "kind": "Measure"
+    },
+    {
+      "displayName": "Longitude",
+      "displayNameKey": "Role_Longitude",
+      "name": "longitude",
+      "kind": "Measure"
+    },
+    {
+      "displayName": "Aircraft type field",
+      "displayNameKey": "Role_AircraftType",
+      "name": "aircraftType",
+      "kind": "GroupingOrMeasure"
+    },
+    {
+      "displayName": "Label",
+      "displayNameKey": "Role_Label",
+      "name": "label",
+      "kind": "GroupingOrMeasure"
+    },
+    {
+      "displayName": "Airline logo URL",
+      "displayNameKey": "Role_AirlineLogoUrl",
+      "name": "airlineLogoUrl",
+      "kind": "GroupingOrMeasure"
+    },
+    {
+      "displayName": "Color group / Airline",
+      "displayNameKey": "Role_ColorGroup",
+      "name": "colorGroup",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Tooltip",
+      "displayNameKey": "Role_Tooltip",
+      "name": "tooltips",
+      "kind": "GroupingOrMeasure"
+    }
+  ],
+  "dataViewMappings": [
+    {
+      "categorical": {
+        "categories": {
+          "select": [
+            {
+              "bind": {
+                "to": "category"
+              }
+            },
+            {
+              "bind": {
+                "to": "timestamp"
+              }
+            },
+            {
+              "bind": {
+                "to": "aircraftType"
+              }
+            },
+            {
+              "bind": {
+                "to": "label"
+              }
+            },
+            {
+              "bind": {
+                "to": "airlineLogoUrl"
+              }
+            },
+            {
+              "bind": {
+                "to": "colorGroup"
+              }
+            },
+            {
+              "for": {
+                "in": "tooltips"
+              }
+            }
+          ],
+          "dataReductionAlgorithm": {
+            "top": {
+              "count": 5000
+            }
+          }
+        },
+        "values": {
+          "select": [
+            {
+              "bind": {
+                "to": "latitude"
+              }
+            },
+            {
+              "bind": {
+                "to": "longitude"
+              }
+            },
+            {
+              "for": {
+                "in": "tooltips"
+              }
+            }
+          ]
+        }
+      },
+      "table": {
+        "rows": {
+          "select": [
+            {
+              "bind": {
+                "to": "category"
+              }
+            },
+            {
+              "bind": {
+                "to": "timestamp"
+              }
+            },
+            {
+              "bind": {
+                "to": "latitude"
+              }
+            },
+            {
+              "bind": {
+                "to": "longitude"
+              }
+            },
+            {
+              "bind": {
+                "to": "aircraftType"
+              }
+            },
+            {
+              "bind": {
+                "to": "label"
+              }
+            },
+            {
+              "bind": {
+                "to": "airlineLogoUrl"
+              }
+            },
+            {
+              "bind": {
+                "to": "colorGroup"
+              }
+            },
+            {
+              "for": {
+                "in": "tooltips"
+              }
+            }
+          ],
+          "dataReductionAlgorithm": {
+            "top": {
+              "count": 5000
+            }
+          }
+        }
+      }
+    }
+  ],
+  "objects": {
+    "marker": {
+      "displayName": "Marker",
+      "displayNameKey": "Marker",
+      "properties": {
+        "color": {
+          "displayName": "Default color",
+          "displayNameKey": "DefaultColor",
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "shape": {
+          "displayName": "Marker type",
+          "displayNameKey": "MarkerType",
+          "type": {
+            "enumeration": [
+              {
+                "displayName": "Point",
+                "displayNameKey": "Circle",
+                "value": "circle"
+              },
+              {
+                "displayName": "Aircraft",
+                "displayNameKey": "Aircraft",
+                "value": "aircraft"
+              }
+            ]
+          }
+        },
+        "size": {
+          "displayName": "Size",
+          "displayNameKey": "Size",
+          "type": {
+            "numeric": true
+          }
+        },
+        "showLabels": {
+          "displayName": "Show labels",
+          "displayNameKey": "ShowLabels",
+          "type": {
+            "bool": true
+          }
+        },
+        "showAirlineLogo": {
+          "displayName": "Show airline logo",
+          "displayNameKey": "ShowAirlineLogo",
+          "type": {
+            "bool": true
+          }
+        },
+        "logoSize": {
+          "displayName": "Logo size",
+          "displayNameKey": "LogoSize",
+          "type": {
+            "numeric": true
+          }
+        }
+      }
+    },
+    "objectMarker": {
+      "displayName": "Object markers",
+      "displayNameKey": "DataPointMarkers",
+      "properties": {
+        "fill": {
+          "displayName": "Color",
+          "displayNameKey": "Color",
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "aircraftTypePreset": {
+          "displayName": "Aircraft type list",
+          "displayNameKey": "AircraftTypeList",
+          "type": {
+            "enumeration": [
+              {
+                "displayName": "A10 - Fairchild A-10",
+                "value": "A10"
+              },
+              {
+                "displayName": "A124 - Antonov An-124",
+                "value": "A124"
+              },
+              {
+                "displayName": "A19N - Airbus A319 neo",
+                "value": "A19N"
+              },
+              {
+                "displayName": "A20N - Airbus A320 neo",
+                "value": "A20N"
+              },
+              {
+                "displayName": "A21N - Airbus A321 neo",
+                "value": "A21N"
+              },
+              {
+                "displayName": "A225 - Antonov An-225",
+                "value": "A225"
+              },
+              {
+                "displayName": "A306 - Airbus A300-600",
+                "value": "A306"
+              },
+              {
+                "displayName": "A310 - Airbus A310",
+                "value": "A310"
+              },
+              {
+                "displayName": "A318 - Airbus A318",
+                "value": "A318"
+              },
+              {
+                "displayName": "A320 - Airbus A320",
+                "value": "A320"
+              },
+              {
+                "displayName": "A321 - Airbus A321",
+                "value": "A321"
+              },
+              {
+                "displayName": "A332 - Airbus A330-200",
+                "value": "A332"
+              },
+              {
+                "displayName": "A333 - Airbus A330-300",
+                "value": "A333"
+              },
+              {
+                "displayName": "A337 - Airbus A330-741 Beluga XL",
+                "value": "A337"
+              },
+              {
+                "displayName": "A338 - Airbus A330-800",
+                "value": "A338"
+              },
+              {
+                "displayName": "A339 - Airbus A330-900",
+                "value": "A339"
+              },
+              {
+                "displayName": "A342 - Airbus A340-200",
+                "value": "A342"
+              },
+              {
+                "displayName": "A343 - Airbus A340-300",
+                "value": "A343"
+              },
+              {
+                "displayName": "A345 - Airbus A340-500",
+                "value": "A345"
+              },
+              {
+                "displayName": "A346 - Airbus A340-600",
+                "value": "A346"
+              },
+              {
+                "displayName": "A359 - Airbus A350-900",
+                "value": "A359"
+              },
+              {
+                "displayName": "A35K - Airbus A350-1000",
+                "value": "A35K"
+              },
+              {
+                "displayName": "A388 - Airbus A380-800",
+                "value": "A388"
+              },
+              {
+                "displayName": "A3ST - Airbus A300ST Beluga",
+                "value": "A3ST"
+              },
+              {
+                "displayName": "A4 - Douglas A-4 Skyhawk",
+                "value": "A4"
+              },
+              {
+                "displayName": "A400 - Airbus A400M",
+                "value": "A400"
+              },
+              {
+                "displayName": "AJET - Dassault Dornier Alpha Jet",
+                "value": "AJET"
+              },
+              {
+                "displayName": "AN12 - Antonov An-12",
+                "value": "AN12"
+              },
+              {
+                "displayName": "AN26 - Antonov An-26",
+                "value": "AN26"
+              },
+              {
+                "displayName": "AS21 - Schleicher ASK-21Mi",
+                "value": "AS21"
+              },
+              {
+                "displayName": "AS32 - AS-332 Super Puma",
+                "value": "AS32"
+              },
+              {
+                "displayName": "AS65 - AS-365 Dauphin",
+                "value": "AS65"
+              },
+              {
+                "displayName": "AT45 - ATR 42-500",
+                "value": "AT45"
+              },
+              {
+                "displayName": "AT75 - ATR 72-500",
+                "value": "AT75"
+              },
+              {
+                "displayName": "ATP - British Aerospace ATP",
+                "value": "ATP"
+              },
+              {
+                "displayName": "B190 - Beech 1900",
+                "value": "B190"
+              },
+              {
+                "displayName": "B1FAST - Rockwell B-1 Lancer (fast)",
+                "value": "B1FAST"
+              },
+              {
+                "displayName": "B1SLOW - Rockwell B-1 Lancer (slow)",
+                "value": "B1SLOW"
+              },
+              {
+                "displayName": "B29 - Boeing B-29 Superfortress",
+                "value": "B29"
+              },
+              {
+                "displayName": "B350 - Beech King Air 350",
+                "value": "B350"
+              },
+              {
+                "displayName": "B38M - Boeing 737 Max 8",
+                "value": "B38M"
+              },
+              {
+                "displayName": "B39M - Boeing 737 Max 9",
+                "value": "B39M"
+              },
+              {
+                "displayName": "B52 - Boeing B-52 Stratofortress",
+                "value": "B52"
+              },
+              {
+                "displayName": "B703 - Boeing 707-300",
+                "value": "B703"
+              },
+              {
+                "displayName": "B712 - Boeing 717-200",
+                "value": "B712"
+              },
+              {
+                "displayName": "B722 - Boeing 727-200",
+                "value": "B722"
+              },
+              {
+                "displayName": "B733 - Boeing 737-300",
+                "value": "B733"
+              },
+              {
+                "displayName": "B734 - Boeing 737-400",
+                "value": "B734"
+              },
+              {
+                "displayName": "B735 - Boeing 737-500",
+                "value": "B735"
+              },
+              {
+                "displayName": "B737 - Boeing 737-700",
+                "value": "B737"
+              },
+              {
+                "displayName": "B738 - Boeing 737-800",
+                "value": "B738"
+              },
+              {
+                "displayName": "B739 - Boeing 737-900",
+                "value": "B739"
+              },
+              {
+                "displayName": "B742 - Boeing 747-200",
+                "value": "B742"
+              },
+              {
+                "displayName": "B744 - Boeing 747-400",
+                "value": "B744"
+              },
+              {
+                "displayName": "B748 - Boeing 747-800",
+                "value": "B748"
+              },
+              {
+                "displayName": "B74S - Boeing 747SP",
+                "value": "B74S"
+              },
+              {
+                "displayName": "B752 - Boeing 757-200",
+                "value": "B752"
+              },
+              {
+                "displayName": "B753 - Boeing 757-300",
+                "value": "B753"
+              },
+              {
+                "displayName": "B762 - Boeing 767-200",
+                "value": "B762"
+              },
+              {
+                "displayName": "B763 - Boeing 767-300",
+                "value": "B763"
+              },
+              {
+                "displayName": "B764 - Boeing 767-400",
+                "value": "B764"
+              },
+              {
+                "displayName": "B772 - Boeing 777-200",
+                "value": "B772"
+              },
+              {
+                "displayName": "B773 - Boeing 777-300",
+                "value": "B773"
+              },
+              {
+                "displayName": "B779 - Boeing 777-900",
+                "value": "B779"
+              },
+              {
+                "displayName": "B77L - Boeing 777-200ER / B777-F",
+                "value": "B77L"
+              },
+              {
+                "displayName": "B77W - Boeing 777-300ER",
+                "value": "B77W"
+              },
+              {
+                "displayName": "B788 - Boeing 787-8",
+                "value": "B788"
+              },
+              {
+                "displayName": "B789 - Boeing 787-9",
+                "value": "B789"
+              },
+              {
+                "displayName": "B78X - Boeing 787-10",
+                "value": "B78X"
+              },
+              {
+                "displayName": "BALL - Balloon",
+                "value": "BALL"
+              },
+              {
+                "displayName": "BCS1 - Airbus A220-100",
+                "value": "BCS1"
+              },
+              {
+                "displayName": "BCS3 - Airbus A220-300",
+                "value": "BCS3"
+              },
+              {
+                "displayName": "BLCF - Boeing 747LCF Dreamlifter",
+                "value": "BLCF"
+              },
+              {
+                "displayName": "BN2P - BN-2 Islander",
+                "value": "BN2P"
+              },
+              {
+                "displayName": "C130 - Lockheed C-130 Hercules",
+                "value": "C130"
+              },
+              {
+                "displayName": "C160 - C-160 Transall",
+                "value": "C160"
+              },
+              {
+                "displayName": "C17 - Boeing C-17 Globemaster 3",
+                "value": "C17"
+              },
+              {
+                "displayName": "C172 - Cessna C-172 Skyhawk",
+                "value": "C172"
+              },
+              {
+                "displayName": "C2 - Grumman C-2 Greyhound",
+                "value": "C2"
+              },
+              {
+                "displayName": "C208 - Cessna C-208 Caravan",
+                "value": "C208"
+              },
+              {
+                "displayName": "C25B - Cessna Citation CJ3",
+                "value": "C25B"
+              },
+              {
+                "displayName": "C295 - Airbus (Casa) C-295",
+                "value": "C295"
+              },
+              {
+                "displayName": "C5M - Lockheed C-5 Super Galaxy",
+                "value": "C5M"
+              },
+              {
+                "displayName": "C750 - Cessna Citation 10",
+                "value": "C750"
+              },
+              {
+                "displayName": "CL2T - Canadair CL-215T / 415",
+                "value": "CL2T"
+              },
+              {
+                "displayName": "CN35 - Airbus (Casa) C-235",
+                "value": "CN35"
+              },
+              {
+                "displayName": "CRJ2 - Canadair RJ-200",
+                "value": "CRJ2"
+              },
+              {
+                "displayName": "CRJ7 - Canadair RJ-700",
+                "value": "CRJ7"
+              },
+              {
+                "displayName": "CRJ9 - Canadair RJ-900",
+                "value": "CRJ9"
+              },
+              {
+                "displayName": "CRJX - Canadair RJ-1000",
+                "value": "CRJX"
+              },
+              {
+                "displayName": "CVN65 - CVN-65 USS Enterprise",
+                "value": "CVN65"
+              },
+              {
+                "displayName": "D228 - Dornier 228",
+                "value": "D228"
+              },
+              {
+                "displayName": "D328 - Dornier 328",
+                "value": "D328"
+              },
+              {
+                "displayName": "DA42 - Diamond DA-42",
+                "value": "DA42"
+              },
+              {
+                "displayName": "DC10 - McDonnell Douglas DC-10",
+                "value": "DC10"
+              },
+              {
+                "displayName": "DC3 - Douglas DC-3",
+                "value": "DC3"
+              },
+              {
+                "displayName": "DC87 - Douglas DC-8-70",
+                "value": "DC87"
+              },
+              {
+                "displayName": "DH8C - DHC-8-300 Dash 8",
+                "value": "DH8C"
+              },
+              {
+                "displayName": "DH8D - DHC-8-400 Dash 8",
+                "value": "DH8D"
+              },
+              {
+                "displayName": "DO27 - Dornier Do-27",
+                "value": "DO27"
+              },
+              {
+                "displayName": "DO28 - Dornier Do-28",
+                "value": "DO28"
+              },
+              {
+                "displayName": "E170 - Embraer ERJ-175",
+                "value": "E170"
+              },
+              {
+                "displayName": "E195 - Embraer ERJ-195",
+                "value": "E195"
+              },
+              {
+                "displayName": "E300 - Extra EA-300",
+                "value": "E300"
+              },
+              {
+                "displayName": "E35L - EMB-135BJ Legacy",
+                "value": "E35L"
+              },
+              {
+                "displayName": "E390 - EMB-390",
+                "value": "E390"
+              },
+              {
+                "displayName": "E3CF - E-3 Sentry (CFM56)",
+                "value": "E3CF"
+              },
+              {
+                "displayName": "E3TF - E-3 Sentry (TF33)",
+                "value": "E3TF"
+              },
+              {
+                "displayName": "E737 - Boeing 737-700 Wedgetail",
+                "value": "E737"
+              },
+              {
+                "displayName": "E8 - E-8 Joint Stars (B703)",
+                "value": "E8"
+              },
+              {
+                "displayName": "EC20 - Airbus H-120 Colibri",
+                "value": "EC20"
+              },
+              {
+                "displayName": "EC35 - Airbus H-135",
+                "value": "EC35"
+              },
+              {
+                "displayName": "EC45 - Airbus H-145",
+                "value": "EC45"
+              },
+              {
+                "displayName": "EUFI - Eurofighter Typhoon",
+                "value": "EUFI"
+              },
+              {
+                "displayName": "F15 - F-15 Eagle",
+                "value": "F15"
+              },
+              {
+                "displayName": "F16 - F-16 Fighting Falcon",
+                "value": "F16"
+              },
+              {
+                "displayName": "F18H - FA-18 Hornet",
+                "value": "F18H"
+              },
+              {
+                "displayName": "F18S - FA-18 Super Hornet",
+                "value": "F18S"
+              },
+              {
+                "displayName": "F22 - F-22 Raptor",
+                "value": "F22"
+              },
+              {
+                "displayName": "F35 - F-35A/C Lightning 2",
+                "value": "F35"
+              },
+              {
+                "displayName": "F406 - Cessna F406 Caravan 2",
+                "value": "F406"
+              },
+              {
+                "displayName": "F5 - F-5 Tiger 2",
+                "value": "F5"
+              },
+              {
+                "displayName": "F50 - Fokker 50",
+                "value": "F50"
+              },
+              {
+                "displayName": "FA7X - Dassault Falcon 7X",
+                "value": "FA7X"
+              },
+              {
+                "displayName": "GAZL - Aerospatiale SA-342 Gazelle",
+                "value": "GAZL"
+              },
+              {
+                "displayName": "GL5T - Global Express 5000",
+                "value": "GL5T"
+              },
+              {
+                "displayName": "GLF6 - Gulfstream G650",
+                "value": "GLF6"
+              },
+              {
+                "displayName": "GYRO - Gyrocopter",
+                "value": "GYRO"
+              },
+              {
+                "displayName": "H47 - CH-47 Chinook",
+                "value": "H47"
+              },
+              {
+                "displayName": "H60 - UH-60 Black Hawk",
+                "value": "H60"
+              },
+              {
+                "displayName": "H64 - AH-64 Apache",
+                "value": "H64"
+              },
+              {
+                "displayName": "HAWK - BAe Hawk",
+                "value": "HAWK"
+              },
+              {
+                "displayName": "HUNT - Hawker Hunter",
+                "value": "HUNT"
+              },
+              {
+                "displayName": "IL62 - Ilyuschin IL-62",
+                "value": "IL62"
+              },
+              {
+                "displayName": "IL76 - Ilyuschin IL-76",
+                "value": "IL76"
+              },
+              {
+                "displayName": "J328 - Dornier 328JET",
+                "value": "J328"
+              },
+              {
+                "displayName": "K35E - KC-135E Stratotanker",
+                "value": "K35E"
+              },
+              {
+                "displayName": "KC2 - Kawasaki C-2",
+                "value": "KC2"
+              },
+              {
+                "displayName": "KC46 - Boeing KC-46 Pegasus",
+                "value": "KC46"
+              },
+              {
+                "displayName": "L159 - L-159 Albatros 2",
+                "value": "L159"
+              },
+              {
+                "displayName": "LJ35 - Learjet 35",
+                "value": "LJ35"
+              },
+              {
+                "displayName": "LYNX - Westland Lynx",
+                "value": "LYNX"
+              },
+              {
+                "displayName": "M326 - Aermacchi MB-326",
+                "value": "M326"
+              },
+              {
+                "displayName": "MD11 - McDonnell Douglas MD-11",
+                "value": "MD11"
+              },
+              {
+                "displayName": "MI24 - MIL Mi-24",
+                "value": "MI24"
+              },
+              {
+                "displayName": "MIRA - Mirage 3",
+                "value": "MIRA"
+              },
+              {
+                "displayName": "MRF1 - Mirage F1",
+                "value": "MRF1"
+              },
+              {
+                "displayName": "NH90 - NH-90",
+                "value": "NH90"
+              },
+              {
+                "displayName": "P1 - Kawasaki P-1",
+                "value": "P1"
+              },
+              {
+                "displayName": "P180 - Piaggio P-180 Avanti",
+                "value": "P180"
+              },
+              {
+                "displayName": "P28A - Piper PA-28",
+                "value": "P28A"
+              },
+              {
+                "displayName": "P3 - Lockheed P-3 Orion",
+                "value": "P3"
+              },
+              {
+                "displayName": "P8 - Boeing P-8 Poseidon",
+                "value": "P8"
+              },
+              {
+                "displayName": "PA46 - Piper PA-46",
+                "value": "PA46"
+              },
+              {
+                "displayName": "PC12 - Pilatus PC-12",
+                "value": "PC12"
+              },
+              {
+                "displayName": "PC6T - Pilatus PC-6",
+                "value": "PC6T"
+              },
+              {
+                "displayName": "PC9 - Pilatus PC-9",
+                "value": "PC9"
+              },
+              {
+                "displayName": "Q4 - RQ-4 Global Hawk",
+                "value": "Q4"
+              },
+              {
+                "displayName": "R135 - Boeing RC-135",
+                "value": "R135"
+              },
+              {
+                "displayName": "R44 - Robinson R44",
+                "value": "R44"
+              },
+              {
+                "displayName": "RFAL - Dassault Rafale",
+                "value": "RFAL"
+              },
+              {
+                "displayName": "RJ85 - Avro RJ-85",
+                "value": "RJ85"
+              },
+              {
+                "displayName": "S61 - Sikorsky S61 Sea King",
+                "value": "S61"
+              },
+              {
+                "displayName": "SB39 - Saab JAS39 Gripen",
+                "value": "SB39"
+              },
+              {
+                "displayName": "SC7 - Short SC-7 Skyvan",
+                "value": "SC7"
+              },
+              {
+                "displayName": "SF25 - Scheibe SF-25 Falke",
+                "value": "SF25"
+              },
+              {
+                "displayName": "SF34 - Saab 340",
+                "value": "SF34"
+              },
+              {
+                "displayName": "SGUP - 377SGT Super Guppy",
+                "value": "SGUP"
+              },
+              {
+                "displayName": "SR22 - Cirrus SR-22",
+                "value": "SR22"
+              },
+              {
+                "displayName": "ST75 - Stearman 75 Kaydet",
+                "value": "ST75"
+              },
+              {
+                "displayName": "SU95 - Sukhoi Superjet 100-95",
+                "value": "SU95"
+              },
+              {
+                "displayName": "T204 - Tupolew Tu-204",
+                "value": "T204"
+              },
+              {
+                "displayName": "T38 - Northrop T-38 Talon",
+                "value": "T38"
+              },
+              {
+                "displayName": "TIGR - EC-665 Tiger",
+                "value": "TIGR"
+              },
+              {
+                "displayName": "TORFAST - Tornado (fast)",
+                "value": "TORFAST"
+              },
+              {
+                "displayName": "TORSLOW - Tornado (slow)",
+                "value": "TORSLOW"
+              },
+              {
+                "displayName": "U2 - Lockheed U-2",
+                "value": "U2"
+              },
+              {
+                "displayName": "UH1 - Bell UH-1",
+                "value": "UH1"
+              },
+              {
+                "displayName": "UNIDENTIFIED - Unidentified",
+                "value": "UNIDENTIFIED"
+              },
+              {
+                "displayName": "V22FAST - V-22 Osprey (fast)",
+                "value": "V22FAST"
+              },
+              {
+                "displayName": "V22SLOW - V-22 Osprey (slow)",
+                "value": "V22SLOW"
+              },
+              {
+                "displayName": "VF35 - F-35B Lightning 2",
+                "value": "VF35"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "map": {
+      "displayName": "Map",
+      "displayNameKey": "Map",
+      "properties": {
+        "style": {
+          "displayName": "Map style",
+          "displayNameKey": "MapStyle",
+          "type": {
+            "enumeration": [
+              {
+                "displayName": "Dark",
+                "displayNameKey": "DarkMap",
+                "value": "dark"
+              },
+              {
+                "displayName": "Light",
+                "displayNameKey": "LightMap",
+                "value": "light"
+              },
+              {
+                "displayName": "OSM",
+                "displayNameKey": "OsmMap",
+                "value": "osm"
+              },
+              {
+                "displayName": "Voyager",
+                "displayNameKey": "VoyagerMap",
+                "value": "voyager"
+              }
+            ]
+          }
+        },
+        "autoZoom": {
+          "displayName": "Auto zoom to points",
+          "displayNameKey": "AutoZoom",
+          "type": {
+            "bool": true
+          }
+        }
+      }
+    },
+    "groupColor": {
+      "displayName": "Airline colors",
+      "displayNameKey": "GroupColors",
+      "properties": {
+        "fill": {
+          "displayName": "Color",
+          "displayNameKey": "Color",
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "behavior": {
+      "displayName": "Clustering & filtering",
+      "displayNameKey": "Behavior",
+      "properties": {
+        "cluster": {
+          "displayName": "Cluster dense areas",
+          "displayNameKey": "Cluster",
+          "type": {
+            "bool": true
+          }
+        },
+        "clusterRadius": {
+          "displayName": "Cluster radius (px)",
+          "displayNameKey": "ClusterRadius",
+          "type": {
+            "numeric": true
+          }
+        },
+        "clusterMaxZoom": {
+          "displayName": "Stop clustering at zoom",
+          "displayNameKey": "ClusterMaxZoom",
+          "type": {
+            "numeric": true
+          }
+        },
+        "nearbyDistance": {
+          "displayName": "Nearby distance (km)",
+          "displayNameKey": "NearbyDistance",
+          "type": {
+            "numeric": true
+          }
+        }
+      }
+    }
+  },
+  "supportsHighlight": true,
+  "supportsMultiVisualSelection": true,
+  "tooltips": {
+    "supportedTypes": {
+      "default": true,
+      "canvas": true
+    }
+  }
+}

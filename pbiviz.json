@@ -1,0 +1,28 @@
+{
+    "visual": {
+        "name": "aircraftMapVisual",
+        "displayName": "Aircraft Map Visual",
+        "guid": "aircraftMapVisual8C9D26668F284C4D877271309FED1833",
+        "visualClassName": "Visual",
+        "version": "1.0.29.6",
+        "description": "Production-ready aircraft map visual with custom SVG markers, per-object colors, selected-field tooltips, localization and area selection.",
+        "supportUrl": "https://example.com/support",
+        "gitHubUrl": ""
+    },
+    "apiVersion": "5.3.0",
+    "author": {
+        "name": "BL",
+        "email": "support@example.com"
+    },
+    "assets": {
+        "icon": "assets/icon.png"
+    },
+    "externalJS": [],
+    "style": "style/visual.less",
+    "capabilities": "capabilities.json",
+    "dependencies": null,
+    "stringResources": [
+        "stringResources/en-US/resources.resjson",
+        "stringResources/ru-RU/resources.resjson"
+    ]
+}

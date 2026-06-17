@@ -1,0 +1,24 @@
+{
+    "compilerOptions": {
+        "target": "ES2017",
+        "module": "esnext",
+        "moduleResolution": "node",
+        "lib": [
+            "ES2017",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "sourceMap": true,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "outDir": "./.tmp/build/"
+    },
+    "files": [
+        "src/visual.ts"
+    ],
+    "include": [
+        "src/**/*.ts"
+    ]
+}

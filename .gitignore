@@ -249,3 +249,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+
+# Power BI visuals tools
+.tmp/
+.api/
