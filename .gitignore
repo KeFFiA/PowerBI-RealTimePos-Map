@@ -253,3 +253,6 @@ $RECYCLE.BIN/
 # Power BI visuals tools
 .tmp/
 .api/
+
+/PowerBI-RealTimePos-Map.iml
+/webpack.statistics.prod.html
