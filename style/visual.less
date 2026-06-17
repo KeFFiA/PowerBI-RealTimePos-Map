@@ -779,6 +779,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
   background: #111827;
   color: #f8fafc;
 }
+/* Canvas marker overlay: purely visual, all hit-testing is done in code on the map. */
+.aircraft-canvas-layer {
+  pointer-events: none;
+}
 .aircraft-marker-icon {
   background: transparent;
   border: 0;

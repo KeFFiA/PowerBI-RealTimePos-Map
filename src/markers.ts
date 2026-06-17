@@ -1,21 +1,17 @@
 /**
- * Renders aircraft points as Leaflet markers using the original visual's DOM
- * structure and class names (so the recovered style/visual.less applies verbatim):
+ * Canvas marker layer.
  *
- *   .aircraft-marker-icon (divIcon)
- *     └ .aircraft-marker[.aircraft-marker-selected|.aircraft-marker-dimmed]
- *         ├ .aircraft-marker-label > (.aircraft-marker-label-logo? + .aircraft-marker-label-text)
- *         └ .aircraft-symbol  ( .aircraft-plane-icon svg | .aircraft-circle-symbol )
+ * Instead of one Leaflet DOM marker per aircraft (which does not scale to thousands
+ * of objects on a real-time feed), every plane / circle / cluster is painted onto a
+ * single <canvas> overlay. Aircraft SVG icons are rasterised once per (type, color,
+ * size) into cached images and blitted with drawImage; hit-testing for clicks and
+ * tooltips is done in code against tight per-plane radii (so hovering only triggers
+ * on the plane itself, not a big invisible box).
  *
- * Two extra behaviours layer on top of the plain marker rendering:
- *   - Clustering: when no selection is active, dense areas collapse into a single
- *     count circle (.aircraft-cluster) sized by member count; zooming in splits it.
- *   - Distance filtering: when a selection/highlight is active, only the selected
- *     points and their geographic neighbours (within a configurable km radius) are
- *     drawn — neighbours dimmed, everything else hidden.
- *
- * The layer is rebuilt fully on every data update, selection change and zoom, so
- * selection/dim state is baked into the markup instead of toggled afterwards.
+ * The layer follows Leaflet's renderer lifecycle: it lives in the overlay pane,
+ * redraws on moveend/zoomend/resize, and transforms with the map during zoom
+ * animation. Drawing happens in layer-point space offset by the canvas origin, and
+ * hit-testing uses Leaflet's event layerPoint so it stays correct while panning.
  */
 import * as L from "leaflet";
 
@@ -28,6 +24,15 @@ export interface MarkerCallbacks {
     /** position is the plane's location in container (viewport) pixels, for tooltip anchoring. */
     onMouseOver: (point: AircraftPoint, position: { x: number; y: number }) => void;
     onMouseOut: (point: AircraftPoint) => void;
+}
+
+export interface MarkerHit {
+    kind: "marker" | "cluster";
+    point?: AircraftPoint;
+    cluster?: Cluster;
+    /** plane centre in layer-point space (for tooltip anchoring) */
+    x: number;
+    y: number;
 }
 
 /** A point as drawn at one world-copy longitude (so planes repeat across the wrapped map). */
@@ -43,13 +48,27 @@ interface Cluster {
     longitude: number;
 }
 
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
+interface HitItem {
+    kind: "marker" | "cluster";
+    point?: AircraftPoint;
+    cluster?: Cluster;
+    /** centre in layer points */
+    x: number;
+    y: number;
+    /** circular hit radius (px) */
+    r: number;
+    /** optional label rectangle in layer points */
+    label?: { x0: number; y0: number; x1: number; y1: number };
 }
+
+interface ImageEntry {
+    img: HTMLImageElement;
+    ready: boolean;
+}
+
+const MAX_INDIVIDUAL_MARKERS = 300;
+const CANVAS_PADDING = 0.1;
+const LABEL_HEIGHT = 16;
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
@@ -67,12 +86,6 @@ function haversineKm(a: AircraftPoint, b: AircraftPoint): number {
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/**
- * Hard cap on individually-drawn aircraft. Past this many in view, clustering kicks
- * in regardless of zoom so the DOM never holds an unbounded number of heavy SVGs.
- */
-const MAX_INDIVIDUAL_MARKERS = 300;
-
 /** Cluster bubble diameter (px) bucketed by member count. */
 function clusterDiameter(count: number): number {
     if (count < 10) {
@@ -87,7 +100,7 @@ function clusterDiameter(count: number): number {
     return 64;
 }
 
-export function resolveAircraftShape(type: string | undefined): AircraftIcon | null {
+function resolveAircraftShape(type: string | undefined): AircraftIcon | null {
     if (!type) {
         return null;
     }
@@ -106,109 +119,70 @@ function centeredScaleTransform(viewBox: string, scale: number): string {
     return `translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`;
 }
 
-/** First <path> becomes the filled body, the rest are thin detail strokes. */
-function prepareShapeBody(body: string): string {
+/**
+ * Standalone SVG for rasterisation: the icon paths are line drawings (fill:none,
+ * stroke:currentColor) styled by CSS in the DOM build; here we inline the same look
+ * (first path = filled silhouette + dark outline, the rest = thin detail strokes) so
+ * the image renders identically without external CSS.
+ */
+function buildStandalonePlaneSvg(icon: AircraftIcon, width: number, height: number, color: string): string {
+    const mainStyle =
+        `fill:${color};stroke:#050608;stroke-width:1.2px;stroke-linejoin:round;` +
+        `stroke-linecap:round;paint-order:fill;vector-effect:non-scaling-stroke`;
+    const detailStyle =
+        `fill:none;stroke:rgba(5,6,8,0.76);stroke-width:0.9px;stroke-linejoin:round;` +
+        `stroke-linecap:round;vector-effect:non-scaling-stroke`;
     let first = true;
-    return body.replace(/<path\b/g, () => {
-        const cls = first ? "aircraft-shape-main" : "aircraft-shape-detail";
+    const body = icon.body.replace(/<path\b[^>]*>/g, (tag) => {
+        const stripped = tag.replace(/\s(?:style|class)="[^"]*"/g, "");
+        const style = first ? mainStyle : detailStyle;
         first = false;
-        return `<path class="${cls}"`;
+        return stripped.replace(/<path/, `<path style="${style}"`);
     });
-}
-
-function buildPlaneSvg(icon: AircraftIcon, width: number, height: number, color: string): string {
     const transform = centeredScaleTransform(icon.viewBox, 1.46);
     return (
-        `<svg class="aircraft-plane-icon aircraft-plane-shape" width="${width}" height="${height}" ` +
-        `viewBox="${escapeHtml(icon.viewBox)}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" ` +
-        `preserveAspectRatio="xMidYMid meet" style="color:${color};">` +
-        `<title>${escapeHtml(icon.name)}</title>` +
-        `<g class="aircraft-shape-fit" transform="${escapeHtml(transform)}">${prepareShapeBody(icon.body)}</g>` +
-        `</svg>`
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
+        `viewBox="${icon.viewBox}" preserveAspectRatio="xMidYMid meet">` +
+        `<g transform="${transform}" style="overflow:visible">${body}</g></svg>`
     );
-}
-
-function buildLabel(point: AircraftPoint, settings: VisualSettingsModel): string {
-    if (!settings.marker.showLabels.value) {
-        return "";
-    }
-    const text = escapeHtml(point.label || point.id);
-    let logo = "";
-    if (settings.marker.showAirlineLogo.value && point.logoUrl) {
-        const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 42);
-        logo =
-            `<img class="aircraft-marker-label-logo" src="${escapeHtml(point.logoUrl)}" alt="" aria-hidden="true" ` +
-            `style="width:${logoSize}px;height:${logoSize}px;">`;
-    }
-    return `<div class="aircraft-marker-label">${logo}<span class="aircraft-marker-label-text">${text}</span></div>`;
 }
 
 export class MarkerLayer {
     private readonly map: L.Map;
-    private readonly group: L.LayerGroup;
+    private readonly canvas: HTMLCanvasElement;
+    private readonly ctx: CanvasRenderingContext2D;
+
     private points: AircraftPoint[] = [];
     private settings: VisualSettingsModel | null = null;
     private callbacks: MarkerCallbacks | null = null;
-    /** Anchor points of the active selection/highlight; null when nothing is filtered. */
     private selectedIndices: Set<number> | null = null;
 
-    /** Memoised plane SVG markup, keyed by type|width|height|color, to avoid rebuilding strings. */
-    private planeSvgCache: Map<string, string> = new Map();
+    private origin: L.Point = L.point(0, 0);
+    private hitItems: HitItem[] = [];
+    private hovered: AircraftPoint | null = null;
+    private drawScheduled = false;
+
+    private readonly iconCache: Map<string, ImageEntry> = new Map();
+    private readonly logoCache: Map<string, ImageEntry> = new Map();
 
     constructor(map: L.Map) {
         this.map = map;
-        this.group = L.layerGroup().addTo(map);
-        // Rebuild on every pan/zoom: clustering is zoom-dependent and only markers
-        // inside the current view are drawn (viewport culling), which keeps the DOM
-        // node count low even with thousands of points. `moveend` covers both.
-        this.map.on("moveend", () => this.rebuild());
-    }
+        const pane = map.getPanes().overlayPane;
+        this.canvas = L.DomUtil.create("canvas", "aircraft-canvas-layer leaflet-zoom-animated", pane);
+        this.ctx = this.canvas.getContext("2d")!;
 
-    /**
-     * Points inside the current view, expanded to one Instance per visible world copy
-     * so planes repeat as the map wraps horizontally. Latitude culling and a small
-     * padding keep the rendered set small.
-     */
-    private instancesInView(points: AircraftPoint[]): Instance[] {
-        const bounds = this.map.getBounds();
-        if (!bounds.isValid()) {
-            return points.map((p) => ({ point: p, lat: p.latitude, lng: p.longitude }));
-        }
-        const padded = bounds.pad(0.15);
-        const west = padded.getWest();
-        const east = padded.getEast();
-        const south = padded.getSouth();
-        const north = padded.getNorth();
-        const instances: Instance[] = [];
-        for (const p of points) {
-            if (p.latitude < south || p.latitude > north) {
-                continue;
-            }
-            // World copies whose shifted longitude falls inside the view.
-            const kStart = Math.ceil((west - p.longitude) / 360);
-            const kEnd = Math.floor((east - p.longitude) / 360);
-            for (let k = kStart; k <= kEnd; k++) {
-                instances.push({ point: p, lat: p.latitude, lng: p.longitude + 360 * k });
-            }
-        }
-        return instances;
-    }
+        this.map.on("moveend zoomend resize", this.reset, this);
+        this.map.on("zoomanim", this.animateZoom, this);
+        this.map.on("mousemove", this.onMouseMove, this);
+        this.map.on("mouseout", this.onMapMouseOut, this);
 
-    private planeSvg(icon: AircraftIcon, width: number, height: number, color: string): string {
-        const key = `${icon.code}|${width}|${height}|${color}`;
-        let svg = this.planeSvgCache.get(key);
-        if (!svg) {
-            svg = buildPlaneSvg(icon, width, height, color);
-            this.planeSvgCache.set(key, svg);
-        }
-        return svg;
+        this.reset();
     }
 
     public render(points: AircraftPoint[], settings: VisualSettingsModel, callbacks: MarkerCallbacks): void {
         this.points = points;
         this.settings = settings;
         this.callbacks = callbacks;
-        // Drop a stale selection that no longer matches the new data.
         if (this.selectedIndices) {
             const valid = new Set(points.map((p) => p.index));
             this.selectedIndices = new Set([...this.selectedIndices].filter((i) => valid.has(i)));
@@ -216,23 +190,55 @@ export class MarkerLayer {
                 this.selectedIndices = null;
             }
         }
-        this.rebuild();
+        this.draw();
     }
 
-    /** Set the selection/highlight anchors. Pass null to clear. Rebuilds only on change. */
+    /** Set the selection/highlight anchors. Pass null to clear. Redraws only on change. */
     public setSelection(selectedIndices: Set<number> | null): void {
         const next = selectedIndices && selectedIndices.size ? selectedIndices : null;
         if (this.selectionEquals(this.selectedIndices, next)) {
             return;
         }
         this.selectedIndices = next;
-        this.rebuild();
+        this.draw();
     }
 
     public clear(): void {
-        this.group.clearLayers();
         this.points = [];
         this.selectedIndices = null;
+        this.hitItems = [];
+        this.clearCanvas();
+    }
+
+    /** Hit-test the given layer point against drawn markers/clusters (topmost first). */
+    public hitTest(layerPoint: L.Point): MarkerHit | null {
+        for (let i = this.hitItems.length - 1; i >= 0; i--) {
+            const it = this.hitItems[i];
+            const dx = layerPoint.x - it.x;
+            const dy = layerPoint.y - it.y;
+            const inCircle = dx * dx + dy * dy <= it.r * it.r;
+            const inLabel =
+                !!it.label &&
+                layerPoint.x >= it.label.x0 &&
+                layerPoint.x <= it.label.x1 &&
+                layerPoint.y >= it.label.y0 &&
+                layerPoint.y <= it.label.y1;
+            if (inCircle || inLabel) {
+                return { kind: it.kind, point: it.point, cluster: it.cluster, x: it.x, y: it.y };
+            }
+        }
+        return null;
+    }
+
+    /** Clicking a cluster zooms to fit its members (or steps in when co-located). */
+    public zoomIntoCluster(cluster: Cluster): void {
+        const bounds = L.latLngBounds(cluster.instances.map((i) => [i.lat, i.lng] as L.LatLngTuple));
+        const zoom = this.map.getZoom();
+        if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
+            this.map.fitBounds(bounds, { padding: [60, 60], maxZoom: Math.min(zoom + 4, 18), animate: true });
+        } else {
+            this.map.setView([cluster.latitude, cluster.longitude], Math.min(zoom + 2, 18), { animate: true });
+        }
     }
 
     private selectionEquals(a: Set<number> | null, b: Set<number> | null): boolean {
@@ -250,64 +256,142 @@ export class MarkerLayer {
         return true;
     }
 
-    private rebuild(): void {
-        this.group.clearLayers();
+    // --- Leaflet layer lifecycle -------------------------------------------------
+
+    private reset(): void {
+        const size = this.map.getSize();
+        const min = this.map.containerPointToLayerPoint(size.multiplyBy(-CANVAS_PADDING)).round();
+        const canvasSize = size.multiplyBy(1 + CANVAS_PADDING * 2).round();
+        this.origin = min;
+
+        const dpr = window.devicePixelRatio || 1;
+        this.canvas.width = Math.max(1, Math.round(canvasSize.x * dpr));
+        this.canvas.height = Math.max(1, Math.round(canvasSize.y * dpr));
+        this.canvas.style.width = `${canvasSize.x}px`;
+        this.canvas.style.height = `${canvasSize.y}px`;
+        L.DomUtil.setPosition(this.canvas, min);
+
+        this.draw();
+    }
+
+    private animateZoom(e: L.ZoomAnimEvent): void {
+        const map = this.map as unknown as {
+            getZoomScale: (z: number, from: number) => number;
+            layerPointToLatLng: (p: L.Point) => L.LatLng;
+            _latLngToNewLayerPoint: (ll: L.LatLng, zoom: number, center: L.LatLng) => L.Point;
+        };
+        const scale = map.getZoomScale(e.zoom, this.map.getZoom());
+        const offset = map._latLngToNewLayerPoint(map.layerPointToLatLng(this.origin), e.zoom, e.center);
+        L.DomUtil.setTransform(this.canvas, offset, scale);
+    }
+
+    private clearCanvas(): void {
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+
+    private scheduleDraw(): void {
+        if (this.drawScheduled) {
+            return;
+        }
+        this.drawScheduled = true;
+        window.requestAnimationFrame(() => {
+            this.drawScheduled = false;
+            this.draw();
+        });
+    }
+
+    // --- Drawing -----------------------------------------------------------------
+
+    private draw(): void {
+        this.clearCanvas();
+        const dpr = window.devicePixelRatio || 1;
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.hitItems = [];
+
         const settings = this.settings;
         if (!settings || !this.callbacks || !this.points.length) {
             return;
         }
 
-        // Only points inside the current view are rendered, one copy per visible world.
         const instances = this.instancesInView(this.points);
 
-        // Filtering active: show selected fully, nearby dimmed, hide the rest. No
-        // clustering here so the spatial relationship around the selection is visible.
-        // Anchors are taken from all points (a selected plane off-screen can still
-        // pull an on-screen neighbour into the "nearby" set).
+        // Filtering active: selected full, nearby dimmed, rest hidden. No clustering.
         if (this.selectedIndices) {
             const selected = this.selectedIndices;
             const anchors = this.points.filter((p) => selected.has(p.index));
             const nearbyKm = clamp(Number(settings.behavior.nearbyDistance.value) || 0, 0, 20000);
+            const dimmed: Instance[] = [];
+            const chosen: Instance[] = [];
             for (const inst of instances) {
                 if (selected.has(inst.point.index)) {
-                    this.addAircraftMarker(inst, settings, true, false);
+                    chosen.push(inst);
                 } else if (nearbyKm > 0 && anchors.some((a) => haversineKm(inst.point, a) <= nearbyKm)) {
-                    this.addAircraftMarker(inst, settings, false, true);
+                    dimmed.push(inst);
                 }
+            }
+            for (const inst of dimmed) {
+                this.drawAircraft(inst, settings, false, true);
+            }
+            for (const inst of chosen) {
+                this.drawAircraft(inst, settings, true, false);
             }
             return;
         }
 
-        // No filtering: optional clustering of dense areas. Above the configured
-        // zoom level clustering is switched off so a small zoom-in already splits
-        // groups into individual aircraft instead of forcing a deep zoom — unless the
-        // view still holds too many planes, in which case clustering stays on to keep
-        // the DOM (and thus performance) bounded.
+        // No filtering: cluster dense areas (and always when too many planes are in view).
         const clusterMaxZoom = clamp(Number(settings.behavior.clusterMaxZoom.value) || 0, 0, 19);
         const tooMany = instances.length > MAX_INDIVIDUAL_MARKERS;
         if (settings.behavior.cluster.value && (this.map.getZoom() <= clusterMaxZoom || tooMany)) {
             const radius = clamp(Number(settings.behavior.clusterRadius.value) || 45, 20, 200);
             for (const cluster of this.clusterPoints(instances, radius)) {
                 if (cluster.instances.length === 1) {
-                    this.addAircraftMarker(cluster.instances[0], settings, false, false);
+                    this.drawAircraft(cluster.instances[0], settings, false, false);
                 } else {
-                    this.addClusterMarker(cluster, settings);
+                    this.drawCluster(cluster, settings);
                 }
             }
             return;
         }
 
         for (const inst of instances) {
-            this.addAircraftMarker(inst, settings, false, false);
+            this.drawAircraft(inst, settings, false, false);
         }
     }
 
-    /** Grid clustering in projected pixel space at the current zoom (pan-independent). */
+    /**
+     * Points inside the current view, expanded to one Instance per visible world copy
+     * so planes repeat as the map wraps horizontally.
+     */
+    private instancesInView(points: AircraftPoint[]): Instance[] {
+        const bounds = this.map.getBounds();
+        if (!bounds.isValid()) {
+            return points.map((p) => ({ point: p, lat: p.latitude, lng: p.longitude }));
+        }
+        const padded = bounds.pad(CANVAS_PADDING + 0.05);
+        const west = padded.getWest();
+        const east = padded.getEast();
+        const south = padded.getSouth();
+        const north = padded.getNorth();
+        const instances: Instance[] = [];
+        for (const p of points) {
+            if (p.latitude < south || p.latitude > north) {
+                continue;
+            }
+            const kStart = Math.ceil((west - p.longitude) / 360);
+            const kEnd = Math.floor((east - p.longitude) / 360);
+            for (let k = kStart; k <= kEnd; k++) {
+                instances.push({ point: p, lat: p.latitude, lng: p.longitude + 360 * k });
+            }
+        }
+        return instances;
+    }
+
+    /** Grid clustering in layer-point space at the current zoom. */
     private clusterPoints(instances: Instance[], radiusPx: number): Cluster[] {
-        const zoom = this.map.getZoom();
         const cells = new Map<string, { instances: Instance[]; sx: number; sy: number }>();
         for (const inst of instances) {
-            const pt = this.map.project([inst.lat, inst.lng], zoom);
+            const pt = this.map.latLngToLayerPoint([inst.lat, inst.lng]);
             const key = `${Math.floor(pt.x / radiusPx)}_${Math.floor(pt.y / radiusPx)}`;
             let cell = cells.get(key);
             if (!cell) {
@@ -325,93 +409,254 @@ export class MarkerLayer {
                 clusters.push({ instances: cell.instances, latitude: inst.lat, longitude: inst.lng });
             } else {
                 const n = cell.instances.length;
-                const center = this.map.unproject([cell.sx / n, cell.sy / n], zoom);
+                const center = this.map.layerPointToLatLng(L.point(cell.sx / n, cell.sy / n));
                 clusters.push({ instances: cell.instances, latitude: center.lat, longitude: center.lng });
             }
         });
         return clusters;
     }
 
-    private addAircraftMarker(
-        inst: Instance,
-        settings: VisualSettingsModel,
-        selected: boolean,
-        dimmed: boolean
-    ): void {
+    private drawAircraft(inst: Instance, settings: VisualSettingsModel, selected: boolean, dimmed: boolean): void {
         const point = inst.point;
+        const lp = this.map.latLngToLayerPoint([inst.lat, inst.lng]);
+        const x = lp.x - this.origin.x;
+        const y = lp.y - this.origin.y;
+
         const size = clamp(Number(settings.marker.size.value) || 50, 18, 90);
         const symW = Math.round(1.32 * size);
-        const boxW = Math.max(132, symW);
-        const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 42);
-        const labelH = settings.marker.showLabels.value ? Math.max(22, logoSize + 6) : 0;
-        const boxH = size + labelH;
         const shapeMode = settings.marker.shape.value.value as string;
-
-        const label = buildLabel(point, settings);
-        // In aircraft mode always render a plane: fall back to the default aircraft
-        // icon when the point's type is unknown, so planes and circles never mix.
         const icon =
             shapeMode === "aircraft"
                 ? resolveAircraftShape(point.aircraftType) || resolveAircraftShape(DEFAULT_AIRCRAFT_TYPE)
                 : null;
-        const symbol = icon
-            ? `<div class="aircraft-symbol" style="width:${symW}px;height:${size}px;">${this.planeSvg(
-                  icon,
-                  symW,
-                  size,
-                  point.color
-              )}</div>`
-            : `<div class="aircraft-symbol aircraft-circle-symbol" style="width:${size}px;height:${size}px;background:${point.color};"></div>`;
 
-        const stateClass = (selected ? " aircraft-marker-selected" : "") + (dimmed ? " aircraft-marker-dimmed" : "");
-        const html = `<div class="aircraft-marker${stateClass}" style="width:${boxW}px;height:${boxH}px;">${label}${symbol}</div>`;
+        const ctx = this.ctx;
+        ctx.save();
+        if (dimmed) {
+            ctx.globalAlpha = 0.28;
+        }
 
-        const divIcon = L.divIcon({
-            className: "aircraft-marker-icon",
-            html,
-            iconSize: [boxW, boxH],
-            iconAnchor: [boxW / 2, boxH - size / 2],
-        });
-        const marker = L.marker([inst.lat, inst.lng], { icon: divIcon, keyboard: false });
-        const callbacks = this.callbacks!;
-        marker.on("click", (e: L.LeafletMouseEvent) => callbacks.onClick(point, e.originalEvent));
-        // Anchor the tooltip to the plane's on-screen position, not the cursor.
-        marker.on("mouseover", () => {
-            const cp = this.map.latLngToContainerPoint([inst.lat, inst.lng]);
-            callbacks.onMouseOver(point, { x: cp.x, y: cp.y });
-        });
-        marker.on("mouseout", () => callbacks.onMouseOut(point));
-        marker.addTo(this.group);
-    }
-
-    private addClusterMarker(cluster: Cluster, settings: VisualSettingsModel): void {
-        const count = cluster.instances.length;
-        const size = clusterDiameter(count);
-        const color = settings.marker.color.value.value;
-        const html =
-            `<div class="aircraft-cluster" style="width:${size}px;height:${size}px;background:${color};">` +
-            `<span class="aircraft-cluster-count">${count}</span></div>`;
-        const divIcon = L.divIcon({
-            className: "aircraft-marker-icon",
-            html,
-            iconSize: [size, size],
-            iconAnchor: [size / 2, size / 2],
-        });
-        const marker = L.marker([cluster.latitude, cluster.longitude], { icon: divIcon, keyboard: false });
-        marker.on("click", () => this.zoomIntoCluster(cluster));
-        marker.addTo(this.group);
-    }
-
-    /** Clicking a cluster zooms to fit its members (or steps in when co-located). */
-    private zoomIntoCluster(cluster: Cluster): void {
-        const bounds = L.latLngBounds(
-            cluster.instances.map((i) => [i.lat, i.lng] as L.LatLngTuple)
-        );
-        const zoom = this.map.getZoom();
-        if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
-            this.map.fitBounds(bounds, { padding: [60, 60], maxZoom: Math.min(zoom + 4, 18), animate: true });
+        if (icon) {
+            const img = this.getPlaneImage(icon, point.color, symW, size);
+            if (img) {
+                if (selected) {
+                    ctx.save();
+                    ctx.shadowColor = "rgba(34,211,238,0.95)";
+                    ctx.shadowBlur = 10;
+                    ctx.drawImage(img, x - symW / 2, y - size / 2, symW, size);
+                    ctx.restore();
+                }
+                ctx.drawImage(img, x - symW / 2, y - size / 2, symW, size);
+            } else {
+                this.drawDot(x, y, Math.max(8, size * 0.35), point.color, selected);
+            }
         } else {
-            this.map.setView([cluster.latitude, cluster.longitude], Math.min(zoom + 2, 18), { animate: true });
+            this.drawDot(x, y, size / 2, point.color, selected);
+        }
+
+        const label = this.drawLabel(point, settings, x, y, size, selected);
+        ctx.restore();
+
+        const hitR = Math.max(10, (icon ? size * 0.45 : size / 2 + 2));
+        this.hitItems.push({
+            kind: "marker",
+            point,
+            x: lp.x,
+            y: lp.y,
+            r: hitR,
+            label: label
+                ? {
+                      x0: lp.x + (label.x0 - x),
+                      y0: lp.y + (label.y0 - y),
+                      x1: lp.x + (label.x1 - x),
+                      y1: lp.y + (label.y1 - y),
+                  }
+                : undefined,
+        });
+    }
+
+    private drawDot(x: number, y: number, radius: number, color: string, selected: boolean): void {
+        const ctx = this.ctx;
+        if (selected) {
+            ctx.save();
+            ctx.shadowColor = "rgba(34,211,238,0.95)";
+            ctx.shadowBlur = 10;
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#050608";
+        ctx.stroke();
+        if (selected) {
+            ctx.restore();
+        }
+    }
+
+    /** Returns the drawn label rectangle (canvas-local coords) or null when labels are off. */
+    private drawLabel(
+        point: AircraftPoint,
+        settings: VisualSettingsModel,
+        x: number,
+        y: number,
+        size: number,
+        selected: boolean
+    ): { x0: number; y0: number; x1: number; y1: number } | null {
+        if (!settings.marker.showLabels.value) {
+            return null;
+        }
+        const ctx = this.ctx;
+        const text = point.label || point.id || "";
+        const pad = 5;
+        const gap = 3;
+        const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 42);
+        const showLogo = settings.marker.showAirlineLogo.value && !!point.logoUrl;
+        const logo = showLogo ? this.getLogoImage(point.logoUrl!) : null;
+        const logoW = showLogo ? logoSize + gap : 0;
+
+        ctx.font = `700 9px "Segoe UI", Arial, sans-serif`;
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        const textW = Math.min(110, ctx.measureText(text).width);
+        const rectW = pad * 2 + logoW + textW;
+        const rectH = LABEL_HEIGHT;
+        const cx = x;
+        const cy = y - size / 2 - rectH / 2;
+        const left = cx - rectW / 2;
+        const top = cy - rectH / 2;
+
+        this.roundRect(left, top, rectW, rectH, 4);
+        ctx.fillStyle = "rgba(255,255,255,0.96)";
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = selected ? "#22d3ee" : "rgba(15,23,42,0.22)";
+        ctx.stroke();
+
+        let textX = left + pad;
+        if (showLogo && logo) {
+            ctx.drawImage(logo, left + pad, cy - logoSize / 2, logoSize, logoSize);
+            textX += logoSize + gap;
+        } else if (showLogo) {
+            textX += logoSize + gap;
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(textX, top, rectW - (textX - left) - pad, rectH);
+        ctx.clip();
+        ctx.fillStyle = "#111827";
+        ctx.fillText(text, textX, cy + 0.5);
+        ctx.restore();
+
+        return { x0: left, y0: top, x1: left + rectW, y1: top + rectH };
+    }
+
+    private drawCluster(cluster: Cluster, settings: VisualSettingsModel): void {
+        const lp = this.map.latLngToLayerPoint([cluster.latitude, cluster.longitude]);
+        const x = lp.x - this.origin.x;
+        const y = lp.y - this.origin.y;
+        const count = cluster.instances.length;
+        const diameter = clusterDiameter(count);
+        const radius = diameter / 2;
+        const color = settings.marker.color.value.value;
+
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.globalAlpha = 0.94;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(5,6,8,0.85)";
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#04201d";
+        ctx.font = `800 12px "Segoe UI", Arial, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(count), x, y + 0.5);
+        ctx.textAlign = "start";
+        ctx.restore();
+
+        this.hitItems.push({ kind: "cluster", cluster, x: lp.x, y: lp.y, r: radius });
+    }
+
+    private roundRect(x: number, y: number, w: number, h: number, r: number): void {
+        const ctx = this.ctx;
+        const rad = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + rad, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rad);
+        ctx.arcTo(x + w, y + h, x, y + h, rad);
+        ctx.arcTo(x, y + h, x, y, rad);
+        ctx.arcTo(x, y, x + w, y, rad);
+        ctx.closePath();
+    }
+
+    // --- Image caches ------------------------------------------------------------
+
+    private getPlaneImage(icon: AircraftIcon, color: string, symW: number, size: number): HTMLImageElement | null {
+        const key = `${icon.code}|${color}|${symW}x${size}`;
+        let entry = this.iconCache.get(key);
+        if (!entry) {
+            const img = new Image();
+            entry = { img, ready: false };
+            const captured = entry;
+            img.onload = () => {
+                captured.ready = true;
+                this.scheduleDraw();
+            };
+            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(buildStandalonePlaneSvg(icon, symW, size, color));
+            this.iconCache.set(key, entry);
+        }
+        return entry.ready ? entry.img : null;
+    }
+
+    private getLogoImage(url: string): HTMLImageElement | null {
+        let entry = this.logoCache.get(url);
+        if (!entry) {
+            const img = new Image();
+            entry = { img, ready: false };
+            const captured = entry;
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+                captured.ready = true;
+                this.scheduleDraw();
+            };
+            img.src = url;
+            this.logoCache.set(url, entry);
+        }
+        return entry.ready ? entry.img : null;
+    }
+
+    // --- Hover -------------------------------------------------------------------
+
+    private onMouseMove(e: L.LeafletMouseEvent): void {
+        if (!this.callbacks) {
+            return;
+        }
+        const hit = this.hitTest(e.layerPoint);
+        const point = hit && hit.kind === "marker" ? hit.point! : null;
+        if (point) {
+            if (this.hovered !== point) {
+                this.hovered = point;
+                const cp = this.map.layerPointToContainerPoint(L.point(hit!.x, hit!.y));
+                this.callbacks.onMouseOver(point, { x: cp.x, y: cp.y });
+            }
+        } else if (this.hovered) {
+            const prev = this.hovered;
+            this.hovered = null;
+            this.callbacks.onMouseOut(prev);
+        }
+    }
+
+    private onMapMouseOut(): void {
+        if (this.hovered && this.callbacks) {
+            const prev = this.hovered;
+            this.hovered = null;
+            this.callbacks.onMouseOut(prev);
         }
     }
 }

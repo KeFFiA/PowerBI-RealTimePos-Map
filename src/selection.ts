@@ -205,14 +205,13 @@ export class AreaSelection {
         this.resetTransient();
     }
 
+    public getMode(): SelectionMode {
+        return this.mode;
+    }
+
     private onClick(e: L.LeafletMouseEvent): void {
-        // In pan mode a click on empty map space clears the selection. Marker clicks
-        // do not bubble to the map (L.Marker.bubblingMouseEvents is false by default),
-        // so this only fires for clicks on the background.
-        if (this.mode === "pan") {
-            this.callbacks.onClear();
-            return;
-        }
+        // Pan-mode clicks (marker select / empty-space clear) are handled by the
+        // visual via canvas hit-testing; here we only build polygon vertices.
         if (this.mode !== "polygon") {
             return;
         }

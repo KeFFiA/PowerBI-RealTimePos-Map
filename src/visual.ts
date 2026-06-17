@@ -91,6 +91,27 @@ export class Visual implements IVisual {
         );
 
         this.selectionManager.registerOnSelectCallback(() => this.applyHighlight());
+
+        // Marker interaction lives on the map (the canvas layer has no DOM markers):
+        // hit-test on click to select a plane / expand a cluster, or clear on empty.
+        this.mapController.getMap().on("click", (e: L.LeafletMouseEvent) => this.onMapClick(e));
+    }
+
+    private onMapClick(e: L.LeafletMouseEvent): void {
+        // Only act in pan mode; the area-selection tools own clicks while drawing.
+        if (this.areaSelection.getMode() !== "pan") {
+            return;
+        }
+        const hit = this.markerLayer.hitTest(e.layerPoint);
+        if (hit?.kind === "cluster" && hit.cluster) {
+            this.markerLayer.zoomIntoCluster(hit.cluster);
+            return;
+        }
+        if (hit?.kind === "marker" && hit.point) {
+            this.onPointClick(hit.point, e.originalEvent);
+            return;
+        }
+        this.selectionManager.clear().then(() => this.applyHighlight());
     }
 
     private buildLanding(): HTMLDivElement {
