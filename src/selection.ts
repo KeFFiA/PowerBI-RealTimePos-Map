@@ -123,8 +123,12 @@ export class AreaSelection {
         L.DomEvent.disableClickPropagation(bar);
         L.DomEvent.disableScrollPropagation(bar);
 
-        const make = (key: string, title: string, isMode: boolean) => {
-            const btn = L.DomUtil.create("button", "aircraft-icon-button", bar) as HTMLButtonElement;
+        // Pan (hand) is always visible; the rest live in a container that slides out
+        // of the hand on hover and collapses back into it (see .aircraft-toolbar-rest).
+        const rest = L.DomUtil.create("div", "aircraft-toolbar-rest", bar);
+
+        const make = (key: string, title: string, isMode: boolean, parent: HTMLElement) => {
+            const btn = L.DomUtil.create("button", "aircraft-icon-button", parent) as HTMLButtonElement;
             btn.type = "button";
             btn.title = title;
             btn.setAttribute("aria-label", title);
@@ -143,12 +147,12 @@ export class AreaSelection {
             this.buttons.set(key, btn);
         };
 
-        make("pan", labels.pan, true);
-        make("rectangle", labels.rectangle, true);
-        make("polygon", labels.polygon, true);
-        make("lasso", labels.lasso, true);
-        make("clear", labels.clear, false);
-        make("back", labels.back, false);
+        make("pan", labels.pan, true, bar);
+        make("rectangle", labels.rectangle, true, rest);
+        make("polygon", labels.polygon, true, rest);
+        make("lasso", labels.lasso, true, rest);
+        make("clear", labels.clear, false, rest);
+        make("back", labels.back, false, rest);
 
         this.setMode("pan");
     }

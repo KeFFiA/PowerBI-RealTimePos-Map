@@ -63,6 +63,12 @@
       "kind": "Grouping"
     },
     {
+      "displayName": "Flight status",
+      "displayNameKey": "Role_FlightStatus",
+      "name": "flightStatus",
+      "kind": "Grouping"
+    },
+    {
       "displayName": "Departure latitude",
       "displayNameKey": "Role_DepLat",
       "name": "depLat",
@@ -90,6 +96,42 @@
       "displayName": "Flown path (lat,lon list)",
       "displayNameKey": "Role_FlownPath",
       "name": "flownPath",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Departure airport name",
+      "displayNameKey": "Role_DepAirport",
+      "name": "depAirport",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Departure city",
+      "displayNameKey": "Role_DepCity",
+      "name": "depCity",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Departure country",
+      "displayNameKey": "Role_DepCountry",
+      "name": "depCountry",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Arrival airport name",
+      "displayNameKey": "Role_ArrAirport",
+      "name": "arrAirport",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Arrival city",
+      "displayNameKey": "Role_ArrCity",
+      "name": "arrCity",
+      "kind": "Grouping"
+    },
+    {
+      "displayName": "Arrival country",
+      "displayNameKey": "Role_ArrCountry",
+      "name": "arrCountry",
       "kind": "Grouping"
     },
     {
@@ -136,7 +178,42 @@
             },
             {
               "bind": {
+                "to": "flightStatus"
+              }
+            },
+            {
+              "bind": {
                 "to": "flownPath"
+              }
+            },
+            {
+              "bind": {
+                "to": "depAirport"
+              }
+            },
+            {
+              "bind": {
+                "to": "depCity"
+              }
+            },
+            {
+              "bind": {
+                "to": "depCountry"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrAirport"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrCity"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrCountry"
               }
             },
             {
@@ -256,7 +333,42 @@
             },
             {
               "bind": {
+                "to": "flightStatus"
+              }
+            },
+            {
+              "bind": {
                 "to": "flownPath"
+              }
+            },
+            {
+              "bind": {
+                "to": "depAirport"
+              }
+            },
+            {
+              "bind": {
+                "to": "depCity"
+              }
+            },
+            {
+              "bind": {
+                "to": "depCountry"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrAirport"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrCity"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrCountry"
               }
             },
             {
@@ -1181,6 +1293,20 @@
               }
             }
           }
+        },
+        "hoverPreview": {
+          "displayName": "Preview route on hover",
+          "displayNameKey": "HoverPreview",
+          "type": {
+            "bool": true
+          }
+        },
+        "hoverSeconds": {
+          "displayName": "Hover delay (seconds)",
+          "displayNameKey": "HoverSeconds",
+          "type": {
+            "numeric": true
+          }
         }
       }
     },
@@ -1222,6 +1348,20 @@
         "clusterMaxZoom": {
           "displayName": "Stop clustering at zoom",
           "displayNameKey": "ClusterMaxZoom",
+          "type": {
+            "numeric": true
+          }
+        },
+        "clusterAutoColor": {
+          "displayName": "Cluster auto color (by airline)",
+          "displayNameKey": "ClusterAutoColor",
+          "type": {
+            "bool": true
+          }
+        },
+        "clusterSaturation": {
+          "displayName": "Cluster color saturation",
+          "displayNameKey": "ClusterSaturation",
           "type": {
             "numeric": true
           }

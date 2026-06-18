@@ -18,7 +18,6 @@ import IVisualHost = powerbi.extensibility.visual.IVisualHost;
 import ISelectionManager = powerbi.extensibility.ISelectionManager;
 import ISelectionId = powerbi.visuals.ISelectionId;
 import ILocalizationManager = powerbi.extensibility.ILocalizationManager;
-import ITooltipService = powerbi.extensibility.ITooltipService;
 import FormattingModel = powerbi.visuals.FormattingModel;
 
 import { VisualSettingsModel } from "./settings";
@@ -30,12 +29,12 @@ import { AreaSelection } from "./selection";
 export class Visual implements IVisual {
     private readonly host: IVisualHost;
     private readonly selectionManager: ISelectionManager;
-    private readonly tooltipService: ITooltipService;
     private readonly localization: ILocalizationManager;
     private readonly formattingService: FormattingSettingsService;
 
     private readonly mapElement: HTMLDivElement;
     private readonly landingElement: HTMLDivElement;
+    private readonly tooltipElement: HTMLDivElement;
     private readonly mapController: MapController;
     private readonly markerLayer: MarkerLayer;
     private readonly areaSelection: AreaSelection;
@@ -47,7 +46,6 @@ export class Visual implements IVisual {
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
         this.selectionManager = this.host.createSelectionManager();
-        this.tooltipService = this.host.tooltipService;
         this.localization = this.host.createLocalizationManager();
         this.formattingService = new FormattingSettingsService(this.localization);
 
@@ -59,6 +57,10 @@ export class Visual implements IVisual {
 
         this.landingElement = this.buildLanding();
         root.appendChild(this.landingElement);
+
+        this.tooltipElement = document.createElement("div");
+        this.tooltipElement.className = "aircraft-custom-tooltip";
+        root.appendChild(this.tooltipElement);
 
         this.mapController = new MapController(this.mapElement);
         this.markerLayer = new MarkerLayer(this.mapController.getMap());
@@ -111,6 +113,25 @@ export class Visual implements IVisual {
             this.onPointClick(hit.point, e.originalEvent);
             return;
         }
+        this.clearSelection();
+    }
+
+    /**
+     * Clear the selection on an empty-space click. Our own selection clears directly.
+     * A cross-filter set by ANOTHER visual can't be cleared by clear() alone, so we
+     * briefly take ownership (select one point) and immediately release it, which
+     * resets the page-level selection.
+     */
+    private clearSelection(): void {
+        const ownSelection = (this.selectionManager.getSelectionIds() as ISelectionId[]).length > 0;
+        const crossActive = this.points.some((p) => !p.highlighted);
+        if (!ownSelection && crossActive && this.points.length) {
+            this.selectionManager
+                .select(this.points[0].selectionId, false)
+                .then(() => this.selectionManager.clear())
+                .then(() => this.applyHighlight());
+            return;
+        }
         this.selectionManager.clear().then(() => this.applyHighlight());
     }
 
@@ -149,7 +170,7 @@ export class Visual implements IVisual {
         // Hide any open tooltip up front: on a data refresh the hovered marker is
         // recreated, so its mouseout never fires and the tooltip would otherwise
         // linger ("stick") until the next hover.
-        this.tooltipService.hide({ immediately: true, isTouchEvent: false });
+        this.hideTooltip();
 
         const viewport = options.viewport;
         this.mapElement.style.width = `${viewport.width}px`;
@@ -176,7 +197,7 @@ export class Visual implements IVisual {
             onClick: (point, ev) => this.onPointClick(point, ev),
             onMouseOver: (point, position) => this.showTooltip(point, position),
             onClusterOver: (groups, position) => this.showClusterTooltip(groups, position),
-            onMouseOut: () => this.tooltipService.hide({ immediately: true, isTouchEvent: false }),
+            onMouseOut: () => this.hideTooltip(),
         });
         this.areaSelection.setPoints(this.points);
 
@@ -286,13 +307,8 @@ export class Visual implements IVisual {
     }
 
     private showTooltip(point: AircraftPoint, position: { x: number; y: number }): void {
-        const dataItems = point.tooltips.length ? point.tooltips : [{ displayName: point.id, value: "" }];
-        this.tooltipService.show({
-            coordinates: [position.x, position.y],
-            dataItems,
-            identities: [point.selectionId],
-            isTouchEvent: false,
-        });
+        const rows = point.tooltips.length ? point.tooltips : [];
+        this.renderTooltip(point.label || point.id || "", rows, position);
     }
 
     /** Cluster hover tooltip: one row per airline (count) listing its aircraft. */
@@ -300,25 +316,75 @@ export class Visual implements IVisual {
         const MAX_ROWS = 20;
         const MAX_NAMES = 10;
         const total = groups.reduce((sum, g) => sum + g.total, 0);
-        const dataItems: powerbi.extensibility.VisualTooltipDataItem[] = [
-            { displayName: "Aircraft", value: String(total) },
-        ];
+        const rows: { displayName: string; value: string }[] = [];
         for (const g of groups.slice(0, MAX_ROWS)) {
             const names = g.aircraft.slice(0, MAX_NAMES);
             const extra = g.total - names.length;
-            dataItems.push({
+            rows.push({
                 displayName: `${g.airline} (${g.total})`,
                 value: names.join(", ") + (extra > 0 ? `, +${extra}` : ""),
             });
         }
         if (groups.length > MAX_ROWS) {
-            dataItems.push({ displayName: "…", value: `+${groups.length - MAX_ROWS} airlines` });
+            rows.push({ displayName: "…", value: `+${groups.length - MAX_ROWS} airlines` });
         }
-        this.tooltipService.show({
-            coordinates: [position.x, position.y],
-            dataItems,
-            identities: [],
-            isTouchEvent: false,
-        });
+        this.renderTooltip(`${total} aircraft`, rows, position);
+    }
+
+    /** Renders the custom DOM tooltip with a title and rows, positioned near the point. */
+    private renderTooltip(
+        title: string,
+        rows: { displayName: string; value: string }[],
+        position: { x: number; y: number }
+    ): void {
+        const el = this.tooltipElement;
+        while (el.firstChild) {
+            el.removeChild(el.firstChild);
+        }
+        if (title) {
+            const t = document.createElement("div");
+            t.className = "aircraft-custom-tooltip-title";
+            t.textContent = title;
+            el.appendChild(t);
+        }
+        for (const r of rows) {
+            const row = document.createElement("div");
+            row.className = "aircraft-custom-tooltip-row";
+            const label = document.createElement("span");
+            label.className = "aircraft-custom-tooltip-label";
+            label.textContent = r.displayName;
+            const value = document.createElement("span");
+            value.className = "aircraft-custom-tooltip-value";
+            value.textContent = r.value;
+            row.appendChild(label);
+            row.appendChild(value);
+            el.appendChild(row);
+        }
+        el.classList.add("visible");
+
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        const vw = this.mapElement.clientWidth;
+        const vh = this.mapElement.clientHeight;
+        let left = position.x + 14;
+        let top = position.y - h - 10;
+        if (top < 4) {
+            top = position.y + 16;
+        }
+        if (left + w > vw - 4) {
+            left = position.x - w - 14;
+        }
+        if (left < 4) {
+            left = 4;
+        }
+        if (top + h > vh - 4) {
+            top = Math.max(4, vh - h - 4);
+        }
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+    }
+
+    private hideTooltip(): void {
+        this.tooltipElement.classList.remove("visible");
     }
 }

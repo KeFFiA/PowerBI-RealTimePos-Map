@@ -15,6 +15,12 @@ import Fill = powerbi.Fill;
 
 import { VisualSettingsModel, DEFAULT_AIRCRAFT_TYPE } from "./settings";
 
+export interface AirportInfo {
+    name?: string;
+    city?: string;
+    country?: string;
+}
+
 export interface AircraftPoint {
     index: number;
     id: string;
@@ -37,10 +43,16 @@ export interface AircraftPoint {
     departure?: [number, number];
     /** arrival airport coordinates, when bound */
     arrival?: [number, number];
+    /** departure airport name/city/country (for the airport label) */
+    departureInfo?: AirportInfo;
+    /** arrival airport name/city/country (for the airport label) */
+    arrivalInfo?: AirportInfo;
     /** already-flown path as [lat, lon] pairs (parsed from the Flown path field) */
     flown?: [number, number][];
     /** heading in degrees clockwise from north; always computed (0 when unknown) */
     heading: number;
+    /** true when Flight status is "on the ground" (route/origin hidden, nose east) */
+    onGround: boolean;
     /**
      * Cross-highlight state from other visuals. true when this row is part of the
      * active highlight (or when no highlight is active at all); false when other
@@ -66,6 +78,21 @@ function findValue(values: DataViewValueColumn[], role: string): DataViewValueCo
 function toNumber(value: PrimitiveValue | undefined): number {
     const n = typeof value === "number" ? value : Number(value);
     return Number.isFinite(n) ? n : NaN;
+}
+
+function readStr(col: DataViewCategoryColumn | undefined, index: number): string | undefined {
+    return col && col.values[index] != null ? String(col.values[index]) : undefined;
+}
+
+function makeAirportInfo(
+    name: string | undefined,
+    city: string | undefined,
+    country: string | undefined
+): AirportInfo | undefined {
+    if (!name && !city && !country) {
+        return undefined;
+    }
+    return { name, city, country };
 }
 
 /** Bearing in degrees clockwise from north, from point a to point b. */
@@ -200,11 +227,18 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
     const labelCol = findCategory(categories, "label");
     const logoCol = findCategory(categories, "airlineLogoUrl");
     const groupCol = findCategory(categories, "colorGroup");
+    const statusCol = findCategory(categories, "flightStatus");
     const depLatCol = findValue(values, "depLat");
     const depLonCol = findValue(values, "depLon");
     const arrLatCol = findValue(values, "arrLat");
     const arrLonCol = findValue(values, "arrLon");
     const flownCol = findCategory(categories, "flownPath");
+    const depAirportCol = findCategory(categories, "depAirport");
+    const depCityCol = findCategory(categories, "depCity");
+    const depCountryCol = findCategory(categories, "depCountry");
+    const arrAirportCol = findCategory(categories, "arrAirport");
+    const arrCityCol = findCategory(categories, "arrCity");
+    const arrCountryCol = findCategory(categories, "arrCountry");
     const colorPalette = host.colorPalette;
     // One selection id per distinct group (reused across its rows) — building one per
     // row would be thousands of allocations on every real-time refresh.
@@ -271,7 +305,20 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
         const arrival: [number, number] | undefined =
             Number.isFinite(arrLat) && Number.isFinite(arrLon) ? [arrLat, arrLon] : undefined;
         const flown = flownCol ? parseFlownPath(flownCol.values[i]) : [];
-        const heading = computeHeading(lat, lon, flown, arrival);
+        const statusStr = readStr(statusCol, i);
+        const onGround = !!statusStr && statusStr.trim().toLowerCase() === "on the ground";
+        // On the ground: nose east, no route/origin (handled in renderer).
+        const heading = onGround ? 90 : computeHeading(lat, lon, flown, arrival);
+        const departureInfo = makeAirportInfo(
+            readStr(depAirportCol, i),
+            readStr(depCityCol, i),
+            readStr(depCountryCol, i)
+        );
+        const arrivalInfo = makeAirportInfo(
+            readStr(arrAirportCol, i),
+            readStr(arrCityCol, i),
+            readStr(arrCountryCol, i)
+        );
 
         const dataType = typeCol && typeCol.values[i] != null ? String(typeCol.values[i]) : undefined;
         const preset = readObjectPreset(categoryCol, i);
@@ -300,8 +347,11 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
             groupSelectionId,
             departure,
             arrival,
+            departureInfo,
+            arrivalInfo,
             flown,
             heading,
+            onGround,
             highlighted: !highlightActive || highlightCols.some((v) => v.highlights![i] != null),
             tooltips,
             selectionId,

@@ -135,6 +135,20 @@ export class BehaviorCard extends Card {
         value: 7,
     });
 
+    clusterAutoColor = new ToggleSwitch({
+        name: "clusterAutoColor",
+        displayName: "Cluster auto color (by airline)",
+        displayNameKey: "ClusterAutoColor",
+        value: true,
+    });
+
+    clusterSaturation = new NumUpDown({
+        name: "clusterSaturation",
+        displayName: "Cluster color saturation",
+        displayNameKey: "ClusterSaturation",
+        value: 1,
+    });
+
     nearbyDistance = new NumUpDown({
         name: "nearbyDistance",
         displayName: "Nearby distance (km)",
@@ -142,7 +156,14 @@ export class BehaviorCard extends Card {
         value: 250,
     });
 
-    slices = [this.cluster, this.clusterRadius, this.clusterMaxZoom, this.nearbyDistance];
+    slices = [
+        this.cluster,
+        this.clusterRadius,
+        this.clusterMaxZoom,
+        this.clusterAutoColor,
+        this.clusterSaturation,
+        this.nearbyDistance,
+    ];
 }
 
 /** "routes" object — selected-aircraft route lines. */
@@ -193,6 +214,20 @@ export class RoutesCard extends Card {
         value: { value: "#22d3ee" },
     });
 
+    hoverPreview = new ToggleSwitch({
+        name: "hoverPreview",
+        displayName: "Preview route on hover",
+        displayNameKey: "HoverPreview",
+        value: true,
+    });
+
+    hoverSeconds = new NumUpDown({
+        name: "hoverSeconds",
+        displayName: "Hover delay (seconds)",
+        displayNameKey: "HoverSeconds",
+        value: 0.5,
+    });
+
     slices = [
         this.show,
         this.maxRoutes,
@@ -200,6 +235,8 @@ export class RoutesCard extends Card {
         this.remainingWidth,
         this.useAircraftColor,
         this.color,
+        this.hoverPreview,
+        this.hoverSeconds,
     ];
 }
 

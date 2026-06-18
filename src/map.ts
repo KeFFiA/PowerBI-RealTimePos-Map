@@ -85,7 +85,7 @@ export class MapController {
         this.styleButtons.forEach((btn, key) => btn.classList.toggle("active", key === this.currentStyle));
     }
 
-    /** Builds the on-map 2x2 style switcher inside the given root element. */
+    /** Builds the on-map style switcher (Dark / Light only) inside the given root element. */
     public buildStyleControl(root: HTMLElement, labels: StyleSwitcherLabels, onChange: (style: MapStyle) => void): void {
         const control = L.DomUtil.create("div", "aircraft-map-style-control", root);
         L.DomEvent.disableClickPropagation(control);
@@ -93,8 +93,6 @@ export class MapController {
         const defs: Array<[MapStyle, string]> = [
             ["dark", labels.dark],
             ["light", labels.light],
-            ["osm", labels.osm],
-            ["voyager", labels.voyager],
         ];
         for (const [style, label] of defs) {
             const btn = L.DomUtil.create("button", "", control) as HTMLButtonElement;

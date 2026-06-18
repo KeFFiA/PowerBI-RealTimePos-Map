@@ -15,7 +15,7 @@
  */
 import * as L from "leaflet";
 
-import { AircraftPoint } from "./dataModel";
+import { AircraftPoint, AirportInfo } from "./dataModel";
 import { VisualSettingsModel, DEFAULT_AIRCRAFT_TYPE } from "./settings";
 import { AIRCRAFT_ICONS, AircraftIcon } from "./aircraftIcons";
 
@@ -76,7 +76,60 @@ interface ImageEntry {
 }
 
 const CANVAS_PADDING = 0.1;
-const LABEL_HEIGHT = 16;
+const LABEL_HEIGHT = 14;
+
+/**
+ * Side-view airliner (nose to the right / east) with landing gear, used for aircraft
+ * that are on the ground. Same draw pipeline as the top-view icons: the first path is
+ * the filled silhouette (fuselage + fin + tailplane + wing + wheels), the rest are
+ * thin detail strokes (window line + gear struts). Drawn without heading rotation.
+ */
+// Wide viewBox with margins so the profile renders at roughly the same footprint
+// as a normal (top-view) marker rather than oversized.
+const SIDE_VIEW_VIEWBOX = "-66 -28 360 160";
+// Body (filled + dark outline): fuselage, fin, tailplane, wing, engine pod.
+const SIDE_BODY_D =
+    "M24,51 L44,42 L182,42 C196,42 204,46 207,52 C204,58 196,62 182,62 L56,62 L24,53 Z " +
+    "M44,42 L36,15 L50,15 L64,42 Z " +
+    "M40,47 L20,42 L20,46 L40,50 Z " +
+    "M120,60 L96,78 L110,78 L138,60 Z " +
+    "M106,74 a12,7 0 1,0 24,0 a12,7 0 1,0 -24,0 Z";
+// Landing gear (struts + wheels): filled in the body colour with NO outline.
+const SIDE_GEAR_D =
+    "M169,61 L173,61 L172.5,80 L169.5,80 Z " +
+    "M111.5,72 L115.5,72 L114.5,84 L111.5,84 Z " +
+    "M122,72 L126,72 L125.5,84 L122.5,84 Z " +
+    "M166,82 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z " +
+    "M108,85 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z " +
+    "M120,85 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z";
+// Detail strokes: window line + cockpit window.
+const SIDE_DETAIL_D = "M58,48.5 L176,48.5 M186,46.5 L196,47.5";
+
+const SIDE_VIEW_ICON: AircraftIcon = {
+    code: "_SIDEVIEW4",
+    name: "Aircraft (side)",
+    sourceFile: "",
+    viewBox: SIDE_VIEW_VIEWBOX,
+    body: "",
+};
+
+/** Side-view icon SVG with the gear filled (no outline), unlike the top-view builder. */
+function buildSideViewSvg(width: number, height: number, color: string): string {
+    const stroke = "stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke";
+    const bodyStyle = `fill:${color};stroke:#050608;stroke-width:1.2px;paint-order:fill;${stroke}`;
+    const gearStyle = `fill:${color};stroke:none`;
+    const detailStyle = `fill:none;stroke:rgba(5,6,8,0.76);stroke-width:0.9px;${stroke}`;
+    const transform = centeredScaleTransform(SIDE_VIEW_VIEWBOX, 1.46);
+    return (
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
+        `viewBox="${SIDE_VIEW_VIEWBOX}" preserveAspectRatio="xMidYMid meet">` +
+        `<g transform="${transform}" style="overflow:visible">` +
+        `<path style="${bodyStyle}" d="${SIDE_BODY_D}" />` +
+        `<path style="${gearStyle}" d="${SIDE_GEAR_D}" />` +
+        `<path style="${detailStyle}" d="${SIDE_DETAIL_D}" />` +
+        `</g></svg>`
+    );
+}
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
@@ -92,6 +145,35 @@ function haversineKm(a: AircraftPoint, b: AircraftPoint): number {
     const la2 = b.latitude * toRad;
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function parseHex(hex: string): [number, number, number] | null {
+    let h = hex.trim().replace(/^#/, "");
+    if (h.length === 3) {
+        h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) {
+        return null;
+    }
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+/**
+ * Tint a colour by `strength` (0..1): the colour mixed with white, where 1 is the
+ * full colour and lower values blend in more white (e.g. 0.75 = 75% colour + 25%
+ * white). Returns the original on parse failure.
+ */
+function tintColor(color: string, strength: number): string {
+    if (strength >= 0.999) {
+        return color;
+    }
+    const rgb = parseHex(color);
+    if (!rgb) {
+        return color;
+    }
+    const f = clamp(strength, 0, 1);
+    const mix = (c: number) => Math.round(c * f + 255 * (1 - f));
+    return `rgb(${mix(rgb[0])},${mix(rgb[1])},${mix(rgb[2])})`;
 }
 
 /** Cluster bubble diameter (px) bucketed by member count. */
@@ -167,7 +249,14 @@ export class MarkerLayer {
 
     private origin: L.Point = L.point(0, 0);
     private hitItems: HitItem[] = [];
-    private hoveredKey: string | null = null;
+    /** Airport circle hit targets (layer points), for hover-to-reveal labels. */
+    private airportHits: { key: string; x: number; y: number; r: number }[] = [];
+    private hoveredAirport: string | null = null;
+    /** Current hover zone: "none" | "m:<idx>" | "c:<x_y>" | "a:<key>". */
+    private hoverZone = "none";
+    /** Long-hover preview: index of the plane to treat as a temporary selection. */
+    private hoverPreviewIndex: number | null = null;
+    private hoverTimer: number | null = null;
     private drawScheduled = false;
 
     private readonly iconCache: Map<string, ImageEntry> = new Map();
@@ -191,6 +280,10 @@ export class MarkerLayer {
         this.points = points;
         this.settings = settings;
         this.callbacks = callbacks;
+        // A data refresh re-creates markers, so drop any in-flight hover preview.
+        this.clearHoverTimer();
+        this.hoverPreviewIndex = null;
+        this.hoverZone = "none";
         if (this.selectedIndices) {
             const valid = new Set(points.map((p) => p.index));
             this.selectedIndices = new Set([...this.selectedIndices].filter((i) => valid.has(i)));
@@ -208,6 +301,11 @@ export class MarkerLayer {
             return;
         }
         this.selectedIndices = next;
+        // A real selection supersedes any hover preview.
+        if (next) {
+            this.clearHoverTimer();
+            this.hoverPreviewIndex = null;
+        }
         this.draw();
     }
 
@@ -215,7 +313,18 @@ export class MarkerLayer {
         this.points = [];
         this.selectedIndices = null;
         this.hitItems = [];
+        this.airportHits = [];
+        this.clearHoverTimer();
+        this.hoverPreviewIndex = null;
+        this.hoverZone = "none";
         this.clearCanvas();
+    }
+
+    private clearHoverTimer(): void {
+        if (this.hoverTimer !== null) {
+            window.clearTimeout(this.hoverTimer);
+            this.hoverTimer = null;
+        }
     }
 
     /** Hit-test the given layer point against drawn markers/clusters (topmost first). */
@@ -316,6 +425,7 @@ export class MarkerLayer {
         const dpr = window.devicePixelRatio || 1;
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.hitItems = [];
+        this.airportHits = [];
 
         const settings = this.settings;
         if (!settings || !this.callbacks || !this.points.length) {
@@ -324,34 +434,48 @@ export class MarkerLayer {
 
         const instances = this.instancesInView(this.points);
 
-        // Filtering active: selected full, nearby dimmed, rest hidden. No clustering.
-        if (this.selectedIndices) {
-            const selected = this.selectedIndices;
-            const anchors = this.points.filter((p) => selected.has(p.index));
+        // Effective filter: a real selection wins; otherwise a long-hover preview
+        // temporarily acts like a selection (dim others, draw its route + airports).
+        const filterSet =
+            this.selectedIndices ||
+            (this.hoverPreviewIndex !== null ? new Set<number>([this.hoverPreviewIndex]) : null);
+
+        // Filtering active. Real selection: selected full, nearby dimmed, rest hidden.
+        // Hover preview: the hovered plane full, ALL others dimmed (none hidden).
+        if (filterSet) {
+            const isPreview = !this.selectedIndices && this.hoverPreviewIndex !== null;
+            const selected = filterSet;
+            const selectedPoints = this.points.filter((p) => selected.has(p.index));
             const nearbyKm = clamp(Number(settings.behavior.nearbyDistance.value) || 0, 0, 20000);
             const dimmed: Instance[] = [];
-            const chosen: Instance[] = [];
+            const chosenVisible: Instance[] = [];
             for (const inst of instances) {
                 if (selected.has(inst.point.index)) {
-                    chosen.push(inst);
-                } else if (nearbyKm > 0 && anchors.some((a) => haversineKm(inst.point, a) <= nearbyKm)) {
+                    chosenVisible.push(inst);
+                } else if (
+                    isPreview ||
+                    (nearbyKm > 0 && selectedPoints.some((a) => haversineKm(inst.point, a) <= nearbyKm))
+                ) {
                     dimmed.push(inst);
                 }
             }
             for (const inst of dimmed) {
                 this.drawAircraft(inst, settings, false, true);
             }
-            // Route lines appear only for selected aircraft, drawn behind the planes.
-            // Skip them past the configured count so a big selection isn't a mess.
+            // Routes/airports are drawn for EVERY selected plane — including ones whose
+            // marker is off-screen — using the world copy nearest the current view, so
+            // the route stays visible even when the plane itself is panned out of sight.
             const maxRoutes = Math.max(0, Math.round(Number(settings.routes.maxRoutes.value) || 0));
             const drawRoutes =
-                settings.routes.show.value && (maxRoutes === 0 || chosen.length <= maxRoutes);
+                settings.routes.show.value && (maxRoutes === 0 || selectedPoints.length <= maxRoutes);
             if (drawRoutes) {
-                for (const inst of chosen) {
-                    this.drawRoute(inst, settings);
+                const centerLng = this.map.getCenter().lng;
+                for (const p of selectedPoints) {
+                    const k = Math.round((centerLng - p.longitude) / 360);
+                    this.drawRoute({ point: p, lat: p.latitude, lng: p.longitude + 360 * k }, settings);
                 }
             }
-            for (const inst of chosen) {
+            for (const inst of chosenVisible) {
                 this.drawAircraft(inst, settings, true, false);
             }
             return;
@@ -445,7 +569,9 @@ export class MarkerLayer {
         const shapeMode = settings.marker.shape.value.value as string;
         const icon =
             shapeMode === "aircraft"
-                ? resolveAircraftShape(point.aircraftType) || resolveAircraftShape(DEFAULT_AIRCRAFT_TYPE)
+                ? point.onGround
+                    ? SIDE_VIEW_ICON
+                    : resolveAircraftShape(point.aircraftType) || resolveAircraftShape(DEFAULT_AIRCRAFT_TYPE)
                 : null;
 
         const ctx = this.ctx;
@@ -457,9 +583,9 @@ export class MarkerLayer {
         if (icon) {
             const img = this.getPlaneImage(icon, point.color, symW, size);
             if (img) {
-                // Rotate the nose to the aircraft heading. The icon set is drawn
-                // nose-down, so add 180deg to align the nose with the heading.
-                const rad = (((point.heading || 0) + 180) * Math.PI) / 180;
+                // Heading rotation for airborne (nose-up icons); on-ground uses the
+                // side-view icon as-is (already nose-east), so no rotation.
+                const rad = point.onGround ? 0 : ((point.heading || 0) * Math.PI) / 180;
                 ctx.save();
                 ctx.translate(x, y);
                 ctx.rotate(rad);
@@ -519,6 +645,35 @@ export class MarkerLayer {
             return [lp.x - this.origin.x, lp.y - this.origin.y];
         };
 
+        // On the ground: no route line, no origin — show only the airport the plane
+        // is currently at (the nearer of departure/arrival to its position).
+        if (point.onGround) {
+            const [px, py] = toXY(point.latitude, point.longitude);
+            let bestCoord: [number, number] | null = null;
+            let bestInfo: AirportInfo | undefined;
+            let bestD = Infinity;
+            const consider = (coord: [number, number] | undefined, info: AirportInfo | undefined) => {
+                if (!coord) {
+                    return;
+                }
+                const d = (coord[0] - point.latitude) ** 2 + (coord[1] - point.longitude) ** 2;
+                if (d < bestD) {
+                    bestD = d;
+                    bestCoord = coord;
+                    bestInfo = info;
+                }
+            };
+            consider(point.departure, point.departureInfo);
+            consider(point.arrival, point.arrivalInfo);
+            if (bestCoord) {
+                const [ax, ay] = toXY(bestCoord[0], bestCoord[1]);
+                const key = `${point.index}:gnd`;
+                this.airportHits.push({ key, x: ax + this.origin.x, y: ay + this.origin.y, r: 9 });
+                this.drawAirport(ax, ay, bestInfo, color, px, py, this.hoveredAirport === key);
+            }
+            return;
+        }
+
         // Solid traveled track: departure -> flown points -> current position.
         const track: [number, number][] = [];
         if (point.departure) {
@@ -563,6 +718,109 @@ export class MarkerLayer {
             ctx.stroke();
             ctx.restore();
         }
+
+        // Airport markers at both endpoints. Circle always; the name/city/country
+        // plate is hidden until the circle is hovered, and placed on the side away
+        // from the aircraft so the plane never covers it.
+        const [planeX, planeY] = toXY(point.latitude, point.longitude);
+        if (point.departure) {
+            const [dx, dy] = toXY(point.departure[0], point.departure[1]);
+            const key = `${point.index}:dep`;
+            this.airportHits.push({ key, x: dx + this.origin.x, y: dy + this.origin.y, r: 9 });
+            this.drawAirport(dx, dy, point.departureInfo, color, planeX, planeY, this.hoveredAirport === key);
+        }
+        if (point.arrival) {
+            const [ax, ay] = toXY(point.arrival[0], point.arrival[1]);
+            const key = `${point.index}:arr`;
+            this.airportHits.push({ key, x: ax + this.origin.x, y: ay + this.origin.y, r: 9 });
+            this.drawAirport(ax, ay, point.arrivalInfo, color, planeX, planeY, this.hoveredAirport === key);
+        }
+    }
+
+    private drawAirport(
+        x: number,
+        y: number,
+        info: AirportInfo | undefined,
+        color: string,
+        planeX: number,
+        planeY: number,
+        showPlate: boolean
+    ): void {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        ctx.restore();
+
+        if (!showPlate || !info) {
+            return;
+        }
+        const lines: { text: string; bold: boolean }[] = [];
+        if (info.name) {
+            lines.push({ text: info.name, bold: true });
+        }
+        if (info.city) {
+            lines.push({ text: info.city, bold: false });
+        }
+        if (info.country) {
+            lines.push({ text: info.country, bold: false });
+        }
+        if (lines.length) {
+            // Place the plate in the quadrant opposite the aircraft so neither the
+            // plane nor its route line (which heads toward the plane) covers it.
+            const hSide: "left" | "right" = planeX >= x ? "left" : "right";
+            const vSide: "up" | "down" = planeY >= y ? "up" : "down";
+            this.drawInfoBox(x, y, lines, hSide, vSide);
+        }
+    }
+
+    /** White info plate beside an airport circle, in the requested corner. */
+    private drawInfoBox(
+        cx: number,
+        cy: number,
+        lines: { text: string; bold: boolean }[],
+        hSide: "left" | "right",
+        vSide: "up" | "down"
+    ): void {
+        const ctx = this.ctx;
+        const padX = 6;
+        const padY = 4;
+        const lh = 12;
+        const gap = 8;
+        const fontFor = (bold: boolean) => `${bold ? 700 : 400} 10px "Segoe UI", Arial, sans-serif`;
+
+        let maxW = 0;
+        for (const l of lines) {
+            ctx.font = fontFor(l.bold);
+            maxW = Math.max(maxW, ctx.measureText(l.text).width);
+        }
+        const w = maxW + padX * 2;
+        const h = lines.length * lh + padY * 2;
+        const left = hSide === "right" ? cx + gap : cx - gap - w;
+        const top = vSide === "down" ? cy + gap : cy - gap - h;
+
+        ctx.save();
+        this.roundRect(left, top, w, h, 4);
+        ctx.fillStyle = "rgba(255,255,255,0.96)";
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(15,23,42,0.22)";
+        ctx.stroke();
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        let ty = top + padY + lh / 2;
+        for (const l of lines) {
+            ctx.font = fontFor(l.bold);
+            ctx.fillStyle = l.bold ? "#111827" : "#374151";
+            ctx.fillText(l.text, left + padX, ty);
+            ty += lh;
+        }
+        ctx.restore();
     }
 
     private drawDot(x: number, y: number, radius: number, color: string, selected: boolean): void {
@@ -598,21 +856,35 @@ export class MarkerLayer {
         }
         const ctx = this.ctx;
         const text = point.label || point.id || "";
-        const pad = 5;
+        const pad = 4;
         const gap = 3;
-        const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 42);
+        const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 36);
         const showLogo = settings.marker.showAirlineLogo.value && !!point.logoUrl;
         const logo = showLogo ? this.getLogoImage(point.logoUrl!) : null;
         const logoW = showLogo ? logoSize + gap : 0;
 
-        ctx.font = `700 9px "Segoe UI", Arial, sans-serif`;
+        ctx.font = `700 8px "Segoe UI", Arial, sans-serif`;
         ctx.textBaseline = "middle";
         ctx.textAlign = "left";
-        const textW = Math.min(110, ctx.measureText(text).width);
+        const textW = Math.min(100, ctx.measureText(text).width);
         const rectW = pad * 2 + logoW + textW;
         const rectH = LABEL_HEIGHT;
-        const cx = x;
-        const cy = y - size / 2 - rectH / 2;
+
+        // Default: centred plate above the plane. On-ground uses the short side-view
+        // icon, so the label sits lower (closer to it). For the routed plane (selected
+        // / preview) offset it perpendicular to the heading so it clears the route line.
+        let cx = x;
+        let cy = y - size / 2 - rectH / 2;
+        if (point.onGround) {
+            cy = y - size * 0.26 - rectH / 2;
+        } else if (selected) {
+            const h = ((point.heading || 0) * Math.PI) / 180;
+            const px = Math.cos(h);
+            const py = Math.sin(h);
+            const d = size / 2 + rectH / 2 + 6;
+            cx = x + px * d;
+            cy = y + py * d;
+        }
         const left = cx - rectW / 2;
         const top = cy - rectH / 2;
 
@@ -647,25 +919,62 @@ export class MarkerLayer {
         const x = lp.x - this.origin.x;
         const y = lp.y - this.origin.y;
         const count = cluster.instances.length;
-        const diameter = clusterDiameter(count);
-        const radius = diameter / 2;
-        const color = settings.marker.color.value.value;
+        const radius = clusterDiameter(count) / 2;
+        const rawStrength = Number(settings.behavior.clusterSaturation.value);
+        const strength = clamp(Number.isFinite(rawStrength) ? rawStrength : 1, 0, 1);
+        const auto = settings.behavior.clusterAutoColor.value;
 
         const ctx = this.ctx;
         ctx.save();
         ctx.globalAlpha = 0.94;
+
+        if (auto) {
+            // Pie chart: one wedge per airline, sized by its share of the cluster.
+            const byAirline = new Map<string, { n: number; color: string }>();
+            for (const inst of cluster.instances) {
+                const p = inst.point;
+                const airline = p.group && p.group.length ? p.group : "—";
+                const entry = byAirline.get(airline);
+                if (entry) {
+                    entry.n++;
+                } else {
+                    byAirline.set(airline, { n: 1, color: tintColor(p.groupColor || p.color, strength) });
+                }
+            }
+            const wedges = [...byAirline.values()].sort((a, b) => b.n - a.n);
+            let start = -Math.PI / 2;
+            for (const wedge of wedges) {
+                const angle = (wedge.n / count) * Math.PI * 2;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.arc(x, y, radius, start, start + angle);
+                ctx.closePath();
+                ctx.fillStyle = wedge.color;
+                ctx.fill();
+                start += angle;
+            }
+        } else {
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = tintColor(settings.marker.color.value.value, strength);
+            ctx.fill();
+        }
+
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
         ctx.lineWidth = 2;
         ctx.strokeStyle = "rgba(5,6,8,0.85)";
         ctx.stroke();
         ctx.globalAlpha = 1;
-        ctx.fillStyle = "#04201d";
+
+        // Count, legible on any wedge colour (white fill with dark outline).
         ctx.font = `800 12px "Segoe UI", Arial, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(5,6,8,0.85)";
+        ctx.strokeText(String(count), x, y + 0.5);
+        ctx.fillStyle = "#ffffff";
         ctx.fillText(String(count), x, y + 0.5);
         ctx.textAlign = "start";
         ctx.restore();
@@ -698,7 +1007,11 @@ export class MarkerLayer {
                 captured.ready = true;
                 this.scheduleDraw();
             };
-            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(buildStandalonePlaneSvg(icon, symW, size, color));
+            const svg =
+                icon.code === SIDE_VIEW_ICON.code
+                    ? buildSideViewSvg(symW, size, color)
+                    : buildStandalonePlaneSvg(icon, symW, size, color);
+            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
             this.iconCache.set(key, entry);
         }
         return entry.ready ? entry.img : null;
@@ -723,35 +1036,102 @@ export class MarkerLayer {
 
     // --- Hover -------------------------------------------------------------------
 
+    private hitTestAirport(layerPoint: L.Point): string | null {
+        for (let i = this.airportHits.length - 1; i >= 0; i--) {
+            const a = this.airportHits[i];
+            const dx = layerPoint.x - a.x;
+            const dy = layerPoint.y - a.y;
+            if (dx * dx + dy * dy <= a.r * a.r) {
+                return a.key;
+            }
+        }
+        return null;
+    }
+
     private onMouseMove(e: L.LeafletMouseEvent): void {
         if (!this.callbacks) {
             return;
         }
-        const hit = this.hitTest(e.layerPoint);
+        // Resolve the hover zone (airport circle wins as the smallest target).
+        const apKey = this.hitTestAirport(e.layerPoint);
+        let hit: MarkerHit | null = null;
+        let zone = "none";
+        if (apKey) {
+            zone = `a:${apKey}`;
+        } else {
+            hit = this.hitTest(e.layerPoint);
+            if (hit && hit.kind === "marker" && hit.point) {
+                zone = `m:${hit.point.index}`;
+            } else if (hit && hit.kind === "cluster") {
+                zone = `c:${Math.round(hit.x)}_${Math.round(hit.y)}`;
+            }
+        }
+        if (zone === this.hoverZone) {
+            return;
+        }
+        this.hoverZone = zone;
+
+        // Tooltip for the new zone.
         if (hit && hit.kind === "marker" && hit.point) {
-            const key = `m${hit.point.index}`;
-            if (this.hoveredKey !== key) {
-                this.hoveredKey = key;
-                const cp = this.map.layerPointToContainerPoint(L.point(hit.x, hit.y));
-                this.callbacks.onMouseOver(hit.point, { x: cp.x, y: cp.y });
-            }
+            const cp = this.map.layerPointToContainerPoint(L.point(hit.x, hit.y));
+            this.callbacks.onMouseOver(hit.point, { x: cp.x, y: cp.y });
         } else if (hit && hit.kind === "cluster" && hit.cluster) {
-            const key = `c${Math.round(hit.x)}_${Math.round(hit.y)}`;
-            if (this.hoveredKey !== key) {
-                this.hoveredKey = key;
-                const cp = this.map.layerPointToContainerPoint(L.point(hit.x, hit.y));
-                this.callbacks.onClusterOver(this.buildClusterGroups(hit.cluster), { x: cp.x, y: cp.y });
-            }
-        } else if (this.hoveredKey) {
-            this.hoveredKey = null;
+            const cp = this.map.layerPointToContainerPoint(L.point(hit.x, hit.y));
+            this.callbacks.onClusterOver(this.buildClusterGroups(hit.cluster), { x: cp.x, y: cp.y });
+        } else {
             this.callbacks.onMouseOut();
+        }
+
+        // Airport plate reveal (redraw to show/hide it).
+        const newAirport = apKey;
+        const airportChanged = newAirport !== this.hoveredAirport;
+        this.hoveredAirport = newAirport;
+
+        // Preview target: a plane arms it (after delay), empty/cluster clears it
+        // (after the same delay), and hovering an airport freezes it as-is.
+        if (apKey) {
+            this.clearHoverTimer();
+        } else if (hit && hit.kind === "marker" && hit.point) {
+            this.setPreviewTarget(hit.point.index);
+        } else {
+            this.setPreviewTarget(null);
+        }
+
+        if (airportChanged) {
+            this.draw();
         }
     }
 
+    /**
+     * Move the preview toward `target` after the configured delay (same delay for
+     * showing and hiding). No-op if already there; suppressed while a real selection
+     * is active or previews are disabled.
+     */
+    private setPreviewTarget(target: number | null): void {
+        this.clearHoverTimer();
+        if (this.hoverPreviewIndex === target) {
+            return;
+        }
+        const cfg = this.settings?.routes;
+        if (target !== null && (!cfg || !cfg.hoverPreview.value || this.selectedIndices)) {
+            return;
+        }
+        const ms = clamp((Number(cfg?.hoverSeconds.value) || 0.5) * 1000, 0, 5000);
+        this.hoverTimer = window.setTimeout(() => {
+            this.hoverTimer = null;
+            this.hoverPreviewIndex = target;
+            this.draw();
+        }, ms);
+    }
+
     private onMapMouseOut(): void {
-        if (this.hoveredKey && this.callbacks) {
-            this.hoveredKey = null;
-            this.callbacks.onMouseOut();
+        this.hoverZone = "none";
+        this.callbacks?.onMouseOut();
+        const hadAirport = this.hoveredAirport !== null;
+        this.hoveredAirport = null;
+        this.setPreviewTarget(null);
+        if (hadAirport) {
+            this.draw();
         }
     }
 
