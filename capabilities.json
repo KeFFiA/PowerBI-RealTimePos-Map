@@ -1132,6 +1132,58 @@
         }
       }
     },
+    "routes": {
+      "displayName": "Routes",
+      "displayNameKey": "Routes",
+      "properties": {
+        "show": {
+          "displayName": "Show routes (selected)",
+          "displayNameKey": "ShowRoutes",
+          "type": {
+            "bool": true
+          }
+        },
+        "maxRoutes": {
+          "displayName": "Max selected for routes",
+          "displayNameKey": "MaxRoutes",
+          "type": {
+            "numeric": true
+          }
+        },
+        "traveledWidth": {
+          "displayName": "Traveled line width",
+          "displayNameKey": "TraveledWidth",
+          "type": {
+            "numeric": true
+          }
+        },
+        "remainingWidth": {
+          "displayName": "Remaining line width",
+          "displayNameKey": "RemainingWidth",
+          "type": {
+            "numeric": true
+          }
+        },
+        "useAircraftColor": {
+          "displayName": "Use aircraft color",
+          "displayNameKey": "UseAircraftColor",
+          "type": {
+            "bool": true
+          }
+        },
+        "color": {
+          "displayName": "Line color",
+          "displayNameKey": "Color",
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        }
+      }
+    },
     "groupColor": {
       "displayName": "Airline colors",
       "displayNameKey": "GroupColors",

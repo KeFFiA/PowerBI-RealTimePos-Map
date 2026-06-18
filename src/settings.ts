@@ -145,6 +145,64 @@ export class BehaviorCard extends Card {
     slices = [this.cluster, this.clusterRadius, this.clusterMaxZoom, this.nearbyDistance];
 }
 
+/** "routes" object — selected-aircraft route lines. */
+export class RoutesCard extends Card {
+    name = "routes";
+    displayName = "Routes";
+    displayNameKey = "Routes";
+
+    show = new ToggleSwitch({
+        name: "show",
+        displayName: "Show routes (selected)",
+        displayNameKey: "ShowRoutes",
+        value: true,
+    });
+
+    maxRoutes = new NumUpDown({
+        name: "maxRoutes",
+        displayName: "Max selected for routes",
+        displayNameKey: "MaxRoutes",
+        value: 5,
+    });
+
+    traveledWidth = new NumUpDown({
+        name: "traveledWidth",
+        displayName: "Traveled line width",
+        displayNameKey: "TraveledWidth",
+        value: 3,
+    });
+
+    remainingWidth = new NumUpDown({
+        name: "remainingWidth",
+        displayName: "Remaining line width",
+        displayNameKey: "RemainingWidth",
+        value: 1.5,
+    });
+
+    useAircraftColor = new ToggleSwitch({
+        name: "useAircraftColor",
+        displayName: "Use aircraft color",
+        displayNameKey: "UseAircraftColor",
+        value: true,
+    });
+
+    color = new ColorPicker({
+        name: "color",
+        displayName: "Line color",
+        displayNameKey: "Color",
+        value: { value: "#22d3ee" },
+    });
+
+    slices = [
+        this.show,
+        this.maxRoutes,
+        this.traveledWidth,
+        this.remainingWidth,
+        this.useAircraftColor,
+        this.color,
+    ];
+}
+
 /**
  * "objectMarker" object — per-object color (and optional aircraft-type preset).
  * Slices are added at runtime, one group of slices per data object, each carrying
@@ -173,7 +231,8 @@ export class VisualSettingsModel extends Model {
     marker = new MarkerCard();
     map = new MapCard();
     behavior = new BehaviorCard();
+    routes = new RoutesCard();
     groupColor = new GroupColorCard();
     objectMarker = new ObjectMarkerCard();
-    cards = [this.marker, this.map, this.behavior, this.groupColor, this.objectMarker];
+    cards = [this.marker, this.map, this.behavior, this.routes, this.groupColor, this.objectMarker];
 }

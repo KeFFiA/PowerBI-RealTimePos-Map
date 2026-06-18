@@ -342,8 +342,14 @@ export class MarkerLayer {
                 this.drawAircraft(inst, settings, false, true);
             }
             // Route lines appear only for selected aircraft, drawn behind the planes.
-            for (const inst of chosen) {
-                this.drawRoute(inst);
+            // Skip them past the configured count so a big selection isn't a mess.
+            const maxRoutes = Math.max(0, Math.round(Number(settings.routes.maxRoutes.value) || 0));
+            const drawRoutes =
+                settings.routes.show.value && (maxRoutes === 0 || chosen.length <= maxRoutes);
+            if (drawRoutes) {
+                for (const inst of chosen) {
+                    this.drawRoute(inst, settings);
+                }
             }
             for (const inst of chosen) {
                 this.drawAircraft(inst, settings, true, false);
@@ -451,8 +457,9 @@ export class MarkerLayer {
         if (icon) {
             const img = this.getPlaneImage(icon, point.color, symW, size);
             if (img) {
-                // Rotate the nose to the aircraft heading (icons point north at 0deg).
-                const rad = ((point.heading || 0) * Math.PI) / 180;
+                // Rotate the nose to the aircraft heading. The icon set is drawn
+                // nose-down, so add 180deg to align the nose with the heading.
+                const rad = (((point.heading || 0) + 180) * Math.PI) / 180;
                 ctx.save();
                 ctx.translate(x, y);
                 ctx.rotate(rad);
@@ -499,16 +506,20 @@ export class MarkerLayer {
      * line straight on to the arrival airport. Drawn in the same world copy as the
      * plane instance via a longitude shift.
      */
-    private drawRoute(inst: Instance): void {
+    private drawRoute(inst: Instance, settings: VisualSettingsModel): void {
         const point = inst.point;
+        const cfg = settings.routes;
         const lonShift = inst.lng - point.longitude;
         const ctx = this.ctx;
-        const color = point.color;
+        const color = cfg.useAircraftColor.value ? point.color : cfg.color.value.value;
+        const traveledW = clamp(Number(cfg.traveledWidth.value) || 3, 0.5, 12);
+        const remainingW = clamp(Number(cfg.remainingWidth.value) || 1.5, 0.5, 12);
         const toXY = (lat: number, lon: number): [number, number] => {
             const lp = this.map.latLngToLayerPoint([lat, lon + lonShift]);
             return [lp.x - this.origin.x, lp.y - this.origin.y];
         };
 
+        // Solid traveled track: departure -> flown points -> current position.
         const track: [number, number][] = [];
         if (point.departure) {
             track.push(point.departure);
@@ -523,7 +534,7 @@ export class MarkerLayer {
         if (track.length >= 2) {
             ctx.save();
             ctx.beginPath();
-            ctx.lineWidth = 3;
+            ctx.lineWidth = traveledW;
             ctx.strokeStyle = color;
             ctx.lineJoin = "round";
             ctx.lineCap = "round";
@@ -537,12 +548,14 @@ export class MarkerLayer {
             ctx.restore();
         }
 
+        // Dashed remaining leg straight to the arrival airport (thinner).
         if (point.arrival) {
             ctx.save();
             ctx.beginPath();
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = remainingW;
             ctx.strokeStyle = color;
-            ctx.setLineDash([6, 5]);
+            ctx.lineCap = "butt";
+            ctx.setLineDash([Math.max(10, remainingW * 6), Math.max(8, remainingW * 5)]);
             const [cx, cy] = toXY(point.latitude, point.longitude);
             const [ax, ay] = toXY(point.arrival[0], point.arrival[1]);
             ctx.moveTo(cx, cy);
