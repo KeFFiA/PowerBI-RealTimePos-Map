@@ -63,6 +63,36 @@
       "kind": "Grouping"
     },
     {
+      "displayName": "Departure latitude",
+      "displayNameKey": "Role_DepLat",
+      "name": "depLat",
+      "kind": "Measure"
+    },
+    {
+      "displayName": "Departure longitude",
+      "displayNameKey": "Role_DepLon",
+      "name": "depLon",
+      "kind": "Measure"
+    },
+    {
+      "displayName": "Arrival latitude",
+      "displayNameKey": "Role_ArrLat",
+      "name": "arrLat",
+      "kind": "Measure"
+    },
+    {
+      "displayName": "Arrival longitude",
+      "displayNameKey": "Role_ArrLon",
+      "name": "arrLon",
+      "kind": "Measure"
+    },
+    {
+      "displayName": "Flown path (lat,lon list)",
+      "displayNameKey": "Role_FlownPath",
+      "name": "flownPath",
+      "kind": "Grouping"
+    },
+    {
       "displayName": "Tooltip",
       "displayNameKey": "Role_Tooltip",
       "name": "tooltips",
@@ -105,6 +135,11 @@
               }
             },
             {
+              "bind": {
+                "to": "flownPath"
+              }
+            },
+            {
               "for": {
                 "in": "tooltips"
               }
@@ -126,6 +161,26 @@
             {
               "bind": {
                 "to": "longitude"
+              }
+            },
+            {
+              "bind": {
+                "to": "depLat"
+              }
+            },
+            {
+              "bind": {
+                "to": "depLon"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrLat"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrLon"
               }
             },
             {
@@ -161,6 +216,26 @@
             },
             {
               "bind": {
+                "to": "depLat"
+              }
+            },
+            {
+              "bind": {
+                "to": "depLon"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrLat"
+              }
+            },
+            {
+              "bind": {
+                "to": "arrLon"
+              }
+            },
+            {
+              "bind": {
                 "to": "aircraftType"
               }
             },
@@ -177,6 +252,11 @@
             {
               "bind": {
                 "to": "colorGroup"
+              }
+            },
+            {
+              "bind": {
+                "to": "flownPath"
               }
             },
             {

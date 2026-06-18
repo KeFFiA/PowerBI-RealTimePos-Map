@@ -33,6 +33,14 @@ export interface AircraftPoint {
     groupColor?: string;
     /** selection id built from the group column, for per-group color persistence */
     groupSelectionId?: ISelectionId;
+    /** departure airport coordinates, when bound */
+    departure?: [number, number];
+    /** arrival airport coordinates, when bound */
+    arrival?: [number, number];
+    /** already-flown path as [lat, lon] pairs (parsed from the Flown path field) */
+    flown?: [number, number][];
+    /** heading in degrees clockwise from north; always computed (0 when unknown) */
+    heading: number;
     /**
      * Cross-highlight state from other visuals. true when this row is part of the
      * active highlight (or when no highlight is active at all); false when other
@@ -58,6 +66,95 @@ function findValue(values: DataViewValueColumn[], role: string): DataViewValueCo
 function toNumber(value: PrimitiveValue | undefined): number {
     const n = typeof value === "number" ? value : Number(value);
     return Number.isFinite(n) ? n : NaN;
+}
+
+/** Bearing in degrees clockwise from north, from point a to point b. */
+function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const toRad = Math.PI / 180;
+    const phi1 = lat1 * toRad;
+    const phi2 = lat2 * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const y = Math.sin(dLon) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+    return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+/**
+ * Parse the Flown path field into [lat, lon] pairs. Accepts a JSON array
+ * (`[[lat,lon],...]` or `[{lat,lng},...]`) or a delimited string where pairs are
+ * separated by `;`/`|` and the two numbers by comma/space (e.g. "55.7,37.6;56,38").
+ */
+function parseFlownPath(value: PrimitiveValue | undefined): [number, number][] {
+    if (value == null) {
+        return [];
+    }
+    const s = String(value).trim();
+    if (!s) {
+        return [];
+    }
+    const out: [number, number][] = [];
+    if (s[0] === "[" || s[0] === "{") {
+        try {
+            const arr = JSON.parse(s);
+            if (Array.isArray(arr)) {
+                for (const el of arr) {
+                    if (Array.isArray(el) && el.length >= 2) {
+                        const a = Number(el[0]);
+                        const b = Number(el[1]);
+                        if (Number.isFinite(a) && Number.isFinite(b)) {
+                            out.push([a, b]);
+                        }
+                    } else if (el && typeof el === "object") {
+                        const rec = el as Record<string, unknown>;
+                        const a = Number(rec.lat ?? rec.latitude ?? rec.y);
+                        const b = Number(rec.lon ?? rec.lng ?? rec.longitude ?? rec.x);
+                        if (Number.isFinite(a) && Number.isFinite(b)) {
+                            out.push([a, b]);
+                        }
+                    }
+                }
+                return out;
+            }
+        } catch {
+            // fall through to delimited parsing
+        }
+    }
+    for (const part of s.split(/[;|]/)) {
+        const nums = part
+            .trim()
+            .split(/[\s,]+/)
+            .map(Number)
+            .filter((n) => Number.isFinite(n));
+        if (nums.length >= 2) {
+            out.push([nums[0], nums[1]]);
+        }
+    }
+    return out;
+}
+
+/**
+ * Heading from the latest travel vector: the last distinct segment of the flown
+ * track (… → current position). Falls back to the bearing toward the arrival
+ * airport when the path has too few points, else 0.
+ */
+function computeHeading(
+    lat: number,
+    lon: number,
+    flown: [number, number][],
+    arrival: [number, number] | undefined
+): number {
+    const track: [number, number][] = [...flown, [lat, lon]];
+    for (let i = track.length - 1; i > 0; i--) {
+        const [la2, lo2] = track[i];
+        const [la1, lo1] = track[i - 1];
+        if (la1 !== la2 || lo1 !== lo2) {
+            return bearing(la1, lo1, la2, lo2);
+        }
+    }
+    if (arrival) {
+        return bearing(lat, lon, arrival[0], arrival[1]);
+    }
+    return 0;
 }
 
 function readObjectFill(category: DataViewCategoryColumn | undefined, index: number): string | undefined {
@@ -103,6 +200,11 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
     const labelCol = findCategory(categories, "label");
     const logoCol = findCategory(categories, "airlineLogoUrl");
     const groupCol = findCategory(categories, "colorGroup");
+    const depLatCol = findValue(values, "depLat");
+    const depLonCol = findValue(values, "depLon");
+    const arrLatCol = findValue(values, "arrLat");
+    const arrLonCol = findValue(values, "arrLon");
+    const flownCol = findCategory(categories, "flownPath");
     const colorPalette = host.colorPalette;
     // One selection id per distinct group (reused across its rows) — building one per
     // row would be thousands of allocations on every real-time refresh.
@@ -159,6 +261,18 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
             }
         }
 
+        // Route endpoints and flown track (for the selected-aircraft route + heading).
+        const depLat = depLatCol ? toNumber(depLatCol.values[i]) : NaN;
+        const depLon = depLonCol ? toNumber(depLonCol.values[i]) : NaN;
+        const arrLat = arrLatCol ? toNumber(arrLatCol.values[i]) : NaN;
+        const arrLon = arrLonCol ? toNumber(arrLonCol.values[i]) : NaN;
+        const departure: [number, number] | undefined =
+            Number.isFinite(depLat) && Number.isFinite(depLon) ? [depLat, depLon] : undefined;
+        const arrival: [number, number] | undefined =
+            Number.isFinite(arrLat) && Number.isFinite(arrLon) ? [arrLat, arrLon] : undefined;
+        const flown = flownCol ? parseFlownPath(flownCol.values[i]) : [];
+        const heading = computeHeading(lat, lon, flown, arrival);
+
         const dataType = typeCol && typeCol.values[i] != null ? String(typeCol.values[i]) : undefined;
         const preset = readObjectPreset(categoryCol, i);
         const tooltips: VisualTooltipDataItem[] = tooltipCols.map((col) => ({
@@ -184,6 +298,10 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
             group,
             groupColor,
             groupSelectionId,
+            departure,
+            arrival,
+            flown,
+            heading,
             highlighted: !highlightActive || highlightCols.some((v) => v.highlights![i] != null),
             tooltips,
             selectionId,

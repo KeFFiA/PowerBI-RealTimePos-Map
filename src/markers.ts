@@ -341,6 +341,10 @@ export class MarkerLayer {
             for (const inst of dimmed) {
                 this.drawAircraft(inst, settings, false, true);
             }
+            // Route lines appear only for selected aircraft, drawn behind the planes.
+            for (const inst of chosen) {
+                this.drawRoute(inst);
+            }
             for (const inst of chosen) {
                 this.drawAircraft(inst, settings, true, false);
             }
@@ -447,14 +451,20 @@ export class MarkerLayer {
         if (icon) {
             const img = this.getPlaneImage(icon, point.color, symW, size);
             if (img) {
+                // Rotate the nose to the aircraft heading (icons point north at 0deg).
+                const rad = ((point.heading || 0) * Math.PI) / 180;
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(rad);
                 if (selected) {
                     ctx.save();
                     ctx.shadowColor = "rgba(34,211,238,0.95)";
                     ctx.shadowBlur = 10;
-                    ctx.drawImage(img, x - symW / 2, y - size / 2, symW, size);
+                    ctx.drawImage(img, -symW / 2, -size / 2, symW, size);
                     ctx.restore();
                 }
-                ctx.drawImage(img, x - symW / 2, y - size / 2, symW, size);
+                ctx.drawImage(img, -symW / 2, -size / 2, symW, size);
+                ctx.restore();
             } else {
                 this.drawDot(x, y, Math.max(8, size * 0.35), point.color, selected);
             }
@@ -481,6 +491,65 @@ export class MarkerLayer {
                   }
                 : undefined,
         });
+    }
+
+    /**
+     * Route for a selected aircraft: a solid line in the plane's colour through the
+     * traveled track (departure -> flown points -> current), and a thinner dashed
+     * line straight on to the arrival airport. Drawn in the same world copy as the
+     * plane instance via a longitude shift.
+     */
+    private drawRoute(inst: Instance): void {
+        const point = inst.point;
+        const lonShift = inst.lng - point.longitude;
+        const ctx = this.ctx;
+        const color = point.color;
+        const toXY = (lat: number, lon: number): [number, number] => {
+            const lp = this.map.latLngToLayerPoint([lat, lon + lonShift]);
+            return [lp.x - this.origin.x, lp.y - this.origin.y];
+        };
+
+        const track: [number, number][] = [];
+        if (point.departure) {
+            track.push(point.departure);
+        }
+        if (point.flown) {
+            for (const f of point.flown) {
+                track.push(f);
+            }
+        }
+        track.push([point.latitude, point.longitude]);
+
+        if (track.length >= 2) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = color;
+            ctx.lineJoin = "round";
+            ctx.lineCap = "round";
+            const [x0, y0] = toXY(track[0][0], track[0][1]);
+            ctx.moveTo(x0, y0);
+            for (let i = 1; i < track.length; i++) {
+                const [x, y] = toXY(track[i][0], track[i][1]);
+                ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        if (point.arrival) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = color;
+            ctx.setLineDash([6, 5]);
+            const [cx, cy] = toXY(point.latitude, point.longitude);
+            const [ax, ay] = toXY(point.arrival[0], point.arrival[1]);
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(ax, ay);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     private drawDot(x: number, y: number, radius: number, color: string, selected: boolean): void {
