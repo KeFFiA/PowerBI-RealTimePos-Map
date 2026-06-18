@@ -166,6 +166,64 @@ export class BehaviorCard extends Card {
     ];
 }
 
+export const LEGEND_POSITION_ITEMS: IEnumMember[] = [
+    { value: "topRight", displayName: "Top right" },
+    { value: "topLeft", displayName: "Top left" },
+    { value: "bottomRight", displayName: "Bottom right" },
+    { value: "bottomLeft", displayName: "Bottom left" },
+];
+
+export const LEGEND_ORIENT_ITEMS: IEnumMember[] = [
+    { value: "vertical", displayName: "Vertical" },
+    { value: "horizontal", displayName: "Horizontal (2 rows)" },
+];
+
+/** "legend" object — airline-colour legend overlay. */
+export class LegendCard extends Card {
+    name = "legend";
+    displayName = "Legend";
+    displayNameKey = "LegendCard";
+
+    show = new ToggleSwitch({
+        name: "show",
+        displayName: "Show legend",
+        displayNameKey: "LegendShow",
+        value: true,
+    });
+
+    position = new ItemDropdown({
+        name: "position",
+        displayName: "Position",
+        displayNameKey: "LegendPosition",
+        items: LEGEND_POSITION_ITEMS,
+        value: LEGEND_POSITION_ITEMS[0],
+    });
+
+    orientation = new ItemDropdown({
+        name: "orientation",
+        displayName: "Orientation",
+        displayNameKey: "LegendOrientation",
+        items: LEGEND_ORIENT_ITEMS,
+        value: LEGEND_ORIENT_ITEMS[0],
+    });
+
+    expanded = new ToggleSwitch({
+        name: "expanded",
+        displayName: "Expanded by default",
+        displayNameKey: "LegendExpanded",
+        value: false,
+    });
+
+    width = new NumUpDown({
+        name: "width",
+        displayName: "Width (px)",
+        displayNameKey: "LegendWidth",
+        value: 130,
+    });
+
+    slices = [this.show, this.position, this.orientation, this.expanded, this.width];
+}
+
 /** "routes" object — selected-aircraft route lines. */
 export class RoutesCard extends Card {
     name = "routes";
@@ -269,7 +327,8 @@ export class VisualSettingsModel extends Model {
     map = new MapCard();
     behavior = new BehaviorCard();
     routes = new RoutesCard();
+    legend = new LegendCard();
     groupColor = new GroupColorCard();
     objectMarker = new ObjectMarkerCard();
-    cards = [this.marker, this.map, this.behavior, this.routes, this.groupColor, this.objectMarker];
+    cards = [this.marker, this.map, this.behavior, this.routes, this.legend, this.groupColor, this.objectMarker];
 }

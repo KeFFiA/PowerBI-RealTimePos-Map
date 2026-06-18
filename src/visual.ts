@@ -35,6 +35,14 @@ export class Visual implements IVisual {
     private readonly mapElement: HTMLDivElement;
     private readonly landingElement: HTMLDivElement;
     private readonly tooltipElement: HTMLDivElement;
+    private readonly legendElement: HTMLDivElement;
+    private legendListElement!: HTMLDivElement;
+    /** true once the user has manually expanded/collapsed the legend this session. */
+    private legendUserToggled = false;
+    /** distinct airline groups in legend display order (for shift-range selection). */
+    private legendGroupsOrder: string[] = [];
+    /** anchor group for shift-range selection (last non-shift legend click). */
+    private legendAnchorGroup: string | null = null;
     private readonly mapController: MapController;
     private readonly markerLayer: MarkerLayer;
     private readonly areaSelection: AreaSelection;
@@ -61,6 +69,9 @@ export class Visual implements IVisual {
         this.tooltipElement = document.createElement("div");
         this.tooltipElement.className = "aircraft-custom-tooltip";
         root.appendChild(this.tooltipElement);
+
+        this.legendElement = this.buildLegend();
+        root.appendChild(this.legendElement);
 
         this.mapController = new MapController(this.mapElement);
         this.markerLayer = new MarkerLayer(this.mapController.getMap());
@@ -152,6 +163,170 @@ export class Visual implements IVisual {
         return landing;
     }
 
+    /**
+     * Airline-colour legend (right edge). Collapsed to a "Legend" header by default;
+     * clicking it slides the list down, and a "Hide" button at the bottom collapses it.
+     */
+    private buildLegend(): HTMLDivElement {
+        const legend = document.createElement("div");
+        legend.className = "aircraft-legend";
+
+        const header = document.createElement("button");
+        header.type = "button";
+        header.className = "aircraft-legend-header";
+        header.textContent = this.localization.getDisplayName("Legend");
+        header.addEventListener("click", () => {
+            this.legendUserToggled = true;
+            legend.classList.toggle("expanded");
+        });
+
+        const body = document.createElement("div");
+        body.className = "aircraft-legend-body";
+
+        this.legendListElement = document.createElement("div");
+        this.legendListElement.className = "aircraft-legend-list";
+
+        const hide = document.createElement("button");
+        hide.type = "button";
+        hide.className = "aircraft-legend-hide";
+        hide.textContent = this.localization.getDisplayName("Hide");
+        hide.addEventListener("click", () => {
+            this.legendUserToggled = true;
+            legend.classList.remove("expanded");
+        });
+
+        body.appendChild(this.legendListElement);
+        body.appendChild(hide);
+        legend.appendChild(header);
+        legend.appendChild(body);
+        return legend;
+    }
+
+    /** Rebuilds the legend rows from the distinct airline groups; hides it if none. */
+    private updateLegend(): void {
+        const cfg = this.settings.legend;
+        const legend = this.legendElement;
+        const list = this.legendListElement;
+        while (list.firstChild) {
+            list.removeChild(list.firstChild);
+        }
+        const seen = new Set<string>();
+        const order: string[] = [];
+        let any = false;
+        for (const point of this.points) {
+            if (point.group === undefined || seen.has(point.group)) {
+                continue;
+            }
+            seen.add(point.group);
+            order.push(point.group);
+            any = true;
+            const group = point.group;
+            const row = document.createElement("div");
+            row.className = "aircraft-legend-row";
+            row.setAttribute("data-group", group);
+            row.addEventListener("click", (ev) => this.onLegendSelect(group, ev));
+            const swatch = document.createElement("span");
+            swatch.className = "aircraft-legend-swatch";
+            swatch.style.background = point.groupColor || point.color;
+            const name = document.createElement("span");
+            name.className = "aircraft-legend-name";
+            name.textContent = group || "(blank)";
+            row.appendChild(swatch);
+            row.appendChild(name);
+            list.appendChild(row);
+        }
+        this.legendGroupsOrder = order;
+
+        // Apply settings: visibility, position, orientation, width, default state.
+        legend.style.display = cfg.show.value && any ? "" : "none";
+        const position = cfg.position.value.value as string;
+        for (const p of ["topRight", "topLeft", "bottomRight", "bottomLeft"]) {
+            legend.classList.toggle(`pos-${p}`, p === position);
+        }
+        const horizontal = (cfg.orientation.value.value as string) === "horizontal";
+        legend.classList.toggle("orient-horizontal", horizontal);
+        const width = Math.max(90, Math.min(420, Number(cfg.width.value) || 130));
+        legend.style.width = horizontal ? "" : `${width}px`;
+        if (!this.legendUserToggled) {
+            legend.classList.toggle("expanded", !!cfg.expanded.value);
+        }
+        this.refreshLegendSelection();
+    }
+
+    /** Groups (airlines) currently part of this visual's selection. */
+    private selectedGroups(): Set<string> {
+        const set = new Set<string>();
+        const ids = this.selectionManager.getSelectionIds() as ISelectionId[];
+        if (!ids.length) {
+            return set;
+        }
+        for (const p of this.points) {
+            if (p.group !== undefined && ids.some((id) => id.equals(p.selectionId as ISelectionId))) {
+                set.add(p.group);
+            }
+        }
+        return set;
+    }
+
+    /** Highlights the rows of currently-selected airlines. */
+    private refreshLegendSelection(): void {
+        const sel = this.selectedGroups();
+        const rows = this.legendListElement.children;
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i] as HTMLElement;
+            const g = row.getAttribute("data-group");
+            row.classList.toggle("selected", g !== null && sel.has(g));
+        }
+    }
+
+    /**
+     * Legend row click → cross-filter by the airline(s).
+     *  - plain: select only that airline (re-click the sole selection clears it);
+     *  - Ctrl/Cmd: toggle the airline in/out of the selection;
+     *  - Shift: range from the anchor airline to the clicked one (in legend order).
+     */
+    private onLegendSelect(group: string, ev: MouseEvent): void {
+        const order = this.legendGroupsOrder;
+        let target = this.selectedGroups();
+
+        if (ev.shiftKey && this.legendAnchorGroup !== null && order.indexOf(this.legendAnchorGroup) >= 0) {
+            const a = order.indexOf(this.legendAnchorGroup);
+            const b = order.indexOf(group);
+            if (b >= 0) {
+                const lo = Math.min(a, b);
+                const hi = Math.max(a, b);
+                target = new Set(order.slice(lo, hi + 1));
+            }
+        } else if (ev.ctrlKey || ev.metaKey) {
+            if (target.has(group)) {
+                target.delete(group);
+            } else {
+                target.add(group);
+            }
+            this.legendAnchorGroup = group;
+        } else {
+            if (target.size === 1 && target.has(group)) {
+                target = new Set();
+            } else {
+                target = new Set([group]);
+            }
+            this.legendAnchorGroup = group;
+        }
+
+        const ids = this.points
+            .filter((p) => p.group !== undefined && target.has(p.group))
+            .map((p) => p.selectionId);
+        const done = () => {
+            this.applyHighlight();
+            this.refreshLegendSelection();
+        };
+        if (!ids.length) {
+            this.selectionManager.clear().then(done);
+        } else {
+            this.selectionManager.select(ids, false).then(done);
+        }
+    }
+
     /** On-map style switcher: apply immediately and persist so it survives refresh. */
     private onStyleSwitch(style: MapStyle): void {
         this.mapController.setStyle(style);
@@ -181,6 +356,7 @@ export class Visual implements IVisual {
         this.settings = this.formattingService.populateFormattingSettingsModel(VisualSettingsModel, dataView);
         this.points = transform(dataView, this.host, this.settings);
         this.pointsByIndex = new Map(this.points.map((p) => [p.index, p]));
+        this.updateLegend();
 
         const hasData = this.points.length > 0;
         this.landingElement.style.display = hasData ? "none" : "flex";
@@ -274,6 +450,7 @@ export class Visual implements IVisual {
     }
 
     private applyHighlight(): void {
+        this.refreshLegendSelection();
         // Priority 1: this visual's own selection (clicking a marker / area select).
         const selected = this.selectionManager.getSelectionIds() as ISelectionId[];
         if (selected.length) {

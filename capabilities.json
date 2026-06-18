@@ -1244,6 +1244,55 @@
         }
       }
     },
+    "legend": {
+      "displayName": "Legend",
+      "displayNameKey": "LegendCard",
+      "properties": {
+        "show": {
+          "displayName": "Show legend",
+          "displayNameKey": "LegendShow",
+          "type": {
+            "bool": true
+          }
+        },
+        "position": {
+          "displayName": "Position",
+          "displayNameKey": "LegendPosition",
+          "type": {
+            "enumeration": [
+              { "displayName": "Top right", "value": "topRight" },
+              { "displayName": "Top left", "value": "topLeft" },
+              { "displayName": "Bottom right", "value": "bottomRight" },
+              { "displayName": "Bottom left", "value": "bottomLeft" }
+            ]
+          }
+        },
+        "orientation": {
+          "displayName": "Orientation",
+          "displayNameKey": "LegendOrientation",
+          "type": {
+            "enumeration": [
+              { "displayName": "Vertical", "value": "vertical" },
+              { "displayName": "Horizontal (2 rows)", "value": "horizontal" }
+            ]
+          }
+        },
+        "expanded": {
+          "displayName": "Expanded by default",
+          "displayNameKey": "LegendExpanded",
+          "type": {
+            "bool": true
+          }
+        },
+        "width": {
+          "displayName": "Width (px)",
+          "displayNameKey": "LegendWidth",
+          "type": {
+            "numeric": true
+          }
+        }
+      }
+    },
     "routes": {
       "displayName": "Routes",
       "displayNameKey": "Routes",

@@ -76,6 +76,14 @@ function findValue(values: DataViewValueColumn[], role: string): DataViewValueCo
 }
 
 function toNumber(value: PrimitiveValue | undefined): number {
+    // Blank / empty must become NaN, not 0: Number(null) and Number("") are both 0,
+    // which would otherwise place departure/arrival at (0,0) and draw a phantom route.
+    if (value == null) {
+        return NaN;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+        return NaN;
+    }
     const n = typeof value === "number" ? value : Number(value);
     return Number.isFinite(n) ? n : NaN;
 }
