@@ -43,6 +43,15 @@ export class Visual implements IVisual {
     private legendGroupsOrder: string[] = [];
     /** anchor group for shift-range selection (last non-shift legend click). */
     private legendAnchorGroup: string | null = null;
+    private readonly timelapseElement: HTMLDivElement;
+    private timelapseSlider!: HTMLInputElement;
+    private timelapseLabel!: HTMLDivElement;
+    private timelapseTicks!: HTMLDataListElement;
+    /** sorted distinct timestamps (epoch ms) across all aircraft flown samples. */
+    private timelapseTimes: number[] = [];
+    private timelapseTime: number | null = null;
+    /** true when the slider is at the latest stop (live positions). */
+    private timelapseLive = true;
     private readonly mapController: MapController;
     private readonly markerLayer: MarkerLayer;
     private readonly areaSelection: AreaSelection;
@@ -72,6 +81,9 @@ export class Visual implements IVisual {
 
         this.legendElement = this.buildLegend();
         root.appendChild(this.legendElement);
+
+        this.timelapseElement = this.buildTimelapse();
+        root.appendChild(this.timelapseElement);
 
         this.mapController = new MapController(this.mapElement);
         this.markerLayer = new MarkerLayer(this.mapController.getMap());
@@ -327,6 +339,137 @@ export class Visual implements IVisual {
         }
     }
 
+    /**
+     * Timelapse control (bottom): collapsed to a "Timeline" header; expanding reveals
+     * a slider whose stops are the distinct timestamps across all aircraft. The latest
+     * stop is "Live" (current positions); earlier stops scrub the map back in time.
+     */
+    private buildTimelapse(): HTMLDivElement {
+        const wrap = document.createElement("div");
+        wrap.className = "aircraft-timelapse";
+
+        const header = document.createElement("button");
+        header.type = "button";
+        header.className = "aircraft-timelapse-header";
+        header.textContent = this.localization.getDisplayName("Timeline");
+        header.addEventListener("click", () => wrap.classList.toggle("expanded"));
+
+        const body = document.createElement("div");
+        body.className = "aircraft-timelapse-body";
+
+        this.timelapseLabel = document.createElement("div");
+        this.timelapseLabel.className = "aircraft-timelapse-time";
+        this.timelapseLabel.textContent = "Live";
+
+        this.timelapseSlider = document.createElement("input");
+        this.timelapseSlider.type = "range";
+        this.timelapseSlider.className = "aircraft-timelapse-slider";
+        this.timelapseSlider.min = "0";
+        this.timelapseSlider.max = "0";
+        this.timelapseSlider.step = "1";
+        this.timelapseSlider.value = "0";
+        this.timelapseTicks = document.createElement("datalist");
+        this.timelapseTicks.id = "aircraft-timelapse-ticks";
+        this.timelapseSlider.setAttribute("list", this.timelapseTicks.id);
+        this.timelapseSlider.addEventListener("input", () => this.onTimelapseInput());
+
+        const hide = document.createElement("button");
+        hide.type = "button";
+        hide.className = "aircraft-timelapse-hide";
+        hide.textContent = this.localization.getDisplayName("Hide");
+        hide.addEventListener("click", () => wrap.classList.remove("expanded"));
+
+        body.appendChild(this.timelapseLabel);
+        body.appendChild(this.timelapseSlider);
+        body.appendChild(this.timelapseTicks);
+        body.appendChild(hide);
+        wrap.appendChild(header);
+        wrap.appendChild(body);
+        return wrap;
+    }
+
+    private onTimelapseInput(): void {
+        const times = this.timelapseTimes;
+        if (times.length < 2) {
+            return;
+        }
+        const idx = Math.max(0, Math.min(times.length - 1, Number(this.timelapseSlider.value)));
+        if (idx >= times.length - 1) {
+            this.timelapseLive = true;
+            this.timelapseTime = null;
+            this.timelapseLabel.textContent = "Live";
+        } else {
+            this.timelapseLive = false;
+            this.timelapseTime = times[idx];
+            this.timelapseLabel.textContent = new Date(times[idx]).toLocaleString();
+        }
+        this.markerLayer.setTimelapse(this.timelapseTime);
+    }
+
+    /** Rebuilds the timeline stops from all flown timestamps; hides the control if <2. */
+    private updateTimelapse(): void {
+        const set = new Set<number>();
+        for (const p of this.points) {
+            if (!p.flown) {
+                continue;
+            }
+            for (const f of p.flown) {
+                if (f.t != null) {
+                    set.add(f.t);
+                }
+            }
+        }
+        const times = Array.from(set).sort((a, b) => a - b);
+        this.timelapseTimes = times;
+
+        if (times.length < 2) {
+            this.timelapseElement.style.display = "none";
+            this.timelapseTime = null;
+            this.timelapseLive = true;
+            this.markerLayer.setTimelapse(null);
+            return;
+        }
+
+        this.timelapseElement.style.display = "";
+        const slider = this.timelapseSlider;
+        slider.min = "0";
+        slider.max = String(times.length - 1);
+        slider.step = "1";
+
+        while (this.timelapseTicks.firstChild) {
+            this.timelapseTicks.removeChild(this.timelapseTicks.firstChild);
+        }
+        if (times.length <= 100) {
+            for (let i = 0; i < times.length; i++) {
+                const opt = document.createElement("option");
+                opt.value = String(i);
+                this.timelapseTicks.appendChild(opt);
+            }
+        }
+
+        if (this.timelapseLive) {
+            slider.value = String(times.length - 1);
+            this.timelapseTime = null;
+            this.timelapseLabel.textContent = "Live";
+            this.markerLayer.setTimelapse(null);
+        } else {
+            const t = this.timelapseTime ?? times[times.length - 1];
+            let idx = times.length - 1;
+            let best = Infinity;
+            for (let i = 0; i < times.length; i++) {
+                const d = Math.abs(times[i] - t);
+                if (d < best) {
+                    best = d;
+                    idx = i;
+                }
+            }
+            slider.value = String(idx);
+            this.timelapseTime = times[idx];
+            this.timelapseLabel.textContent = new Date(times[idx]).toLocaleString();
+            this.markerLayer.setTimelapse(this.timelapseTime);
+        }
+    }
+
     /** On-map style switcher: apply immediately and persist so it survives refresh. */
     private onStyleSwitch(style: MapStyle): void {
         this.mapController.setStyle(style);
@@ -357,6 +500,7 @@ export class Visual implements IVisual {
         this.points = transform(dataView, this.host, this.settings);
         this.pointsByIndex = new Map(this.points.map((p) => [p.index, p]));
         this.updateLegend();
+        this.updateTimelapse();
 
         const hasData = this.points.length > 0;
         this.landingElement.style.display = hasData ? "none" : "flex";

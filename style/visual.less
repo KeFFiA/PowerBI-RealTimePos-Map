@@ -902,7 +902,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   overflow-wrap: anywhere;
   line-height: 1.2;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
 .aircraft-legend-hide {
@@ -942,6 +942,73 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .aircraft-legend.orient-horizontal .aircraft-legend-name {
   -webkit-line-clamp: 1;
+}
+.aircraft-timelapse {
+  position: absolute;
+  z-index: 9999;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.66);
+  color: #111827;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  font-size: 11px;
+}
+.aircraft-timelapse-header {
+  border: 0;
+  background: transparent;
+  color: #111827;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.aircraft-timelapse-header:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+.aircraft-timelapse-body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.28s ease, opacity 0.22s ease;
+}
+.aircraft-timelapse.expanded .aircraft-timelapse-body {
+  max-height: 96px;
+  opacity: 1;
+}
+.aircraft-timelapse-time {
+  padding: 2px 12px 0;
+  text-align: center;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.aircraft-timelapse-slider {
+  display: block;
+  width: 340px;
+  max-width: calc(100vw - 60px);
+  margin: 6px 12px;
+}
+.aircraft-timelapse-hide {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 8px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #111827;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px;
+  cursor: pointer;
+}
+.aircraft-timelapse-hide:hover {
+  background: #ffffff;
 }
 .aircraft-marker-icon {
   background: transparent;

@@ -18,6 +18,7 @@ import * as L from "leaflet";
 import { AircraftPoint, AirportInfo } from "./dataModel";
 import { VisualSettingsModel, DEFAULT_AIRCRAFT_TYPE } from "./settings";
 import { AIRCRAFT_ICONS, AircraftIcon } from "./aircraftIcons";
+import { TEST_LOGO } from "./testLogo";
 
 /** Aircraft of one airline inside a hovered cluster. */
 export interface ClusterTooltipGroup {
@@ -47,8 +48,14 @@ export interface MarkerHit {
 /** A point as drawn at one world-copy longitude (so planes repeat across the wrapped map). */
 interface Instance {
     point: AircraftPoint;
+    /** display latitude (may differ from point.latitude during timelapse) */
     lat: number;
+    /** display longitude shifted into the visible world copy */
     lng: number;
+    /** display longitude without the world-copy shift */
+    lon0: number;
+    /** display heading in degrees */
+    heading: number;
 }
 
 interface Cluster {
@@ -135,16 +142,31 @@ function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
 }
 
-/** Great-circle distance in kilometres between two points. */
-function haversineKm(a: AircraftPoint, b: AircraftPoint): number {
+/** Great-circle distance in kilometres between two lat/lon pairs. */
+function haversineLL(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371;
     const toRad = Math.PI / 180;
-    const dLat = (b.latitude - a.latitude) * toRad;
-    const dLon = (b.longitude - a.longitude) * toRad;
-    const la1 = a.latitude * toRad;
-    const la2 = b.latitude * toRad;
-    const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const h =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function haversineKm(a: AircraftPoint, b: AircraftPoint): number {
+    return haversineLL(a.latitude, a.longitude, b.latitude, b.longitude);
+}
+
+/** Bearing in degrees clockwise from north, from point a to point b. */
+function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const toRad = Math.PI / 180;
+    const phi1 = lat1 * toRad;
+    const phi2 = lat2 * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const y = Math.sin(dLon) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+    return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
 }
 
 function parseHex(hex: string): [number, number, number] | null {
@@ -246,6 +268,8 @@ export class MarkerLayer {
     private settings: VisualSettingsModel | null = null;
     private callbacks: MarkerCallbacks | null = null;
     private selectedIndices: Set<number> | null = null;
+    /** Timelapse time (epoch ms); null = live (latest positions). */
+    private timelapseTime: number | null = null;
 
     private origin: L.Point = L.point(0, 0);
     private hitItems: HitItem[] = [];
@@ -307,6 +331,53 @@ export class MarkerLayer {
             this.hoverPreviewIndex = null;
         }
         this.draw();
+    }
+
+    /** Set the timelapse time (epoch ms); null = live. Redraws. */
+    public setTimelapse(time: number | null): void {
+        if (this.timelapseTime === time) {
+            return;
+        }
+        this.timelapseTime = time;
+        this.draw();
+    }
+
+    /**
+     * Display position/heading of a point at the current timelapse time. Returns null
+     * to hide the point (timelapse is before its first sample). Live (or no timed
+     * data) → the point's current position/heading.
+     */
+    private resolveDisplay(point: AircraftPoint): { lat: number; lon: number; heading: number } | null {
+        const T = this.timelapseTime;
+        if (T === null || !point.flown || !point.flown.length) {
+            return { lat: point.latitude, lon: point.longitude, heading: point.heading };
+        }
+        const timed = point.flown.filter((f) => f.t != null);
+        if (!timed.length) {
+            return { lat: point.latitude, lon: point.longitude, heading: point.heading };
+        }
+        if (T >= (timed[timed.length - 1].t as number)) {
+            return { lat: point.latitude, lon: point.longitude, heading: point.heading };
+        }
+        let idx = -1;
+        for (let i = 0; i < timed.length; i++) {
+            if ((timed[i].t as number) <= T) {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+        if (idx < 0) {
+            return null; // before this aircraft's first sample
+        }
+        const cur = timed[idx];
+        let heading = point.heading;
+        if (idx > 0) {
+            heading = bearingDeg(timed[idx - 1].lat, timed[idx - 1].lon, cur.lat, cur.lon);
+        } else if (timed.length > 1) {
+            heading = bearingDeg(cur.lat, cur.lon, timed[1].lat, timed[1].lon);
+        }
+        return { lat: cur.lat, lon: cur.lon, heading };
     }
 
     public clear(): void {
@@ -471,8 +542,15 @@ export class MarkerLayer {
             if (drawRoutes) {
                 const centerLng = this.map.getCenter().lng;
                 for (const p of selectedPoints) {
-                    const k = Math.round((centerLng - p.longitude) / 360);
-                    this.drawRoute({ point: p, lat: p.latitude, lng: p.longitude + 360 * k }, settings);
+                    const d = this.resolveDisplay(p);
+                    if (!d) {
+                        continue;
+                    }
+                    const k = Math.round((centerLng - d.lon) / 360);
+                    this.drawRoute(
+                        { point: p, lat: d.lat, lng: d.lon + 360 * k, lon0: d.lon, heading: d.heading },
+                        settings
+                    );
                 }
             }
             for (const inst of chosenVisible) {
@@ -507,23 +585,25 @@ export class MarkerLayer {
      */
     private instancesInView(points: AircraftPoint[]): Instance[] {
         const bounds = this.map.getBounds();
-        if (!bounds.isValid()) {
-            return points.map((p) => ({ point: p, lat: p.latitude, lng: p.longitude }));
-        }
-        const padded = bounds.pad(CANVAS_PADDING + 0.05);
-        const west = padded.getWest();
-        const east = padded.getEast();
-        const south = padded.getSouth();
-        const north = padded.getNorth();
+        const valid = bounds.isValid();
+        const padded = valid ? bounds.pad(CANVAS_PADDING + 0.05) : null;
+        const west = padded ? padded.getWest() : -180;
+        const east = padded ? padded.getEast() : 180;
+        const south = padded ? padded.getSouth() : -90;
+        const north = padded ? padded.getNorth() : 90;
         const instances: Instance[] = [];
         for (const p of points) {
-            if (p.latitude < south || p.latitude > north) {
+            const d = this.resolveDisplay(p);
+            if (!d) {
+                continue; // hidden at the current timelapse time
+            }
+            if (d.lat < south || d.lat > north) {
                 continue;
             }
-            const kStart = Math.ceil((west - p.longitude) / 360);
-            const kEnd = Math.floor((east - p.longitude) / 360);
+            const kStart = Math.ceil((west - d.lon) / 360);
+            const kEnd = Math.floor((east - d.lon) / 360);
             for (let k = kStart; k <= kEnd; k++) {
-                instances.push({ point: p, lat: p.latitude, lng: p.longitude + 360 * k });
+                instances.push({ point: p, lat: d.lat, lng: d.lon + 360 * k, lon0: d.lon, heading: d.heading });
             }
         }
         return instances;
@@ -585,7 +665,7 @@ export class MarkerLayer {
             if (img) {
                 // Heading rotation for airborne (nose-up icons); on-ground uses the
                 // side-view icon as-is (already nose-east), so no rotation.
-                const rad = point.onGround ? 0 : ((point.heading || 0) * Math.PI) / 180;
+                const rad = point.onGround ? 0 : ((inst.heading || 0) * Math.PI) / 180;
                 ctx.save();
                 ctx.translate(x, y);
                 ctx.rotate(rad);
@@ -635,7 +715,9 @@ export class MarkerLayer {
     private drawRoute(inst: Instance, settings: VisualSettingsModel): void {
         const point = inst.point;
         const cfg = settings.routes;
-        const lonShift = inst.lng - point.longitude;
+        const lonShift = inst.lng - inst.lon0;
+        const curLat = inst.lat;
+        const curLon = inst.lon0;
         const ctx = this.ctx;
         const color = cfg.useAircraftColor.value ? point.color : cfg.color.value.value;
         const traveledW = clamp(Number(cfg.traveledWidth.value) || 3, 0.5, 12);
@@ -648,7 +730,7 @@ export class MarkerLayer {
         // On the ground: no route line, no origin — show only the airport the plane
         // is currently at (the nearer of departure/arrival to its position).
         if (point.onGround) {
-            const [px, py] = toXY(point.latitude, point.longitude);
+            const [px, py] = toXY(curLat, curLon);
             let bestCoord: [number, number] | null = null;
             let bestInfo: AirportInfo | undefined;
             let bestD = Infinity;
@@ -656,7 +738,7 @@ export class MarkerLayer {
                 if (!coord) {
                     return;
                 }
-                const d = (coord[0] - point.latitude) ** 2 + (coord[1] - point.longitude) ** 2;
+                const d = (coord[0] - curLat) ** 2 + (coord[1] - curLon) ** 2;
                 if (d < bestD) {
                     bestD = d;
                     bestCoord = coord;
@@ -674,17 +756,34 @@ export class MarkerLayer {
             return;
         }
 
-        // Solid traveled track: departure -> flown points -> current position.
+        // Solid traveled track. With a flown path we draw exactly that polyline in
+        // order (the recorded trail IS the route); during timelapse only samples up to
+        // the current time are drawn. The current position is appended only when the
+        // last sample is close to it (so a trail that doesn't quite reach the plane
+        // still connects, without drawing a long stray segment). Without a trail we
+        // fall back to a straight departure -> current leg.
+        const T = this.timelapseTime;
         const track: [number, number][] = [];
-        if (point.departure) {
-            track.push(point.departure);
-        }
-        if (point.flown) {
-            for (const f of point.flown) {
-                track.push(f);
+        const samples =
+            point.flown && point.flown.length
+                ? T === null
+                    ? point.flown
+                    : point.flown.filter((f) => f.t != null && (f.t as number) <= T)
+                : [];
+        if (samples.length) {
+            for (const f of samples) {
+                track.push([f.lat, f.lon]);
             }
+            const last = samples[samples.length - 1];
+            if (haversineLL(last.lat, last.lon, curLat, curLon) <= 200) {
+                track.push([curLat, curLon]);
+            }
+        } else if (!point.flown || !point.flown.length) {
+            if (point.departure) {
+                track.push(point.departure);
+            }
+            track.push([curLat, curLon]);
         }
-        track.push([point.latitude, point.longitude]);
 
         if (track.length >= 2) {
             ctx.save();
@@ -711,7 +810,7 @@ export class MarkerLayer {
             ctx.strokeStyle = color;
             ctx.lineCap = "butt";
             ctx.setLineDash([Math.max(10, remainingW * 6), Math.max(8, remainingW * 5)]);
-            const [cx, cy] = toXY(point.latitude, point.longitude);
+            const [cx, cy] = toXY(curLat, curLon);
             const [ax, ay] = toXY(point.arrival[0], point.arrival[1]);
             ctx.moveTo(cx, cy);
             ctx.lineTo(ax, ay);
@@ -722,7 +821,7 @@ export class MarkerLayer {
         // Airport markers at both endpoints. Circle always; the name/city/country
         // plate is hidden until the circle is hovered, and placed on the side away
         // from the aircraft so the plane never covers it.
-        const [planeX, planeY] = toXY(point.latitude, point.longitude);
+        const [planeX, planeY] = toXY(curLat, curLon);
         if (point.departure) {
             const [dx, dy] = toXY(point.departure[0], point.departure[1]);
             const key = `${point.index}:dep`;
@@ -859,16 +958,20 @@ export class MarkerLayer {
         const pad = 4;
         const gap = 3;
         const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 36);
-        const showLogo = settings.marker.showAirlineLogo.value && !!point.logoUrl;
-        const logo = showLogo ? this.getLogoImage(point.logoUrl!) : null;
+        // Per-aircraft logo URL (from data) when available, else the hardcoded test
+        // logo for every aircraft during testing.
+        const logoSrc = point.logoUrl || TEST_LOGO;
+        const showLogo = settings.marker.showAirlineLogo.value && !!logoSrc;
+        const logo = showLogo ? this.getLogoImage(logoSrc) : null;
         const logoW = showLogo ? logoSize + gap : 0;
 
         ctx.font = `700 8px "Segoe UI", Arial, sans-serif`;
         ctx.textBaseline = "middle";
         ctx.textAlign = "left";
         const textW = Math.min(100, ctx.measureText(text).width);
-        const rectW = pad * 2 + logoW + textW;
-        const rectH = LABEL_HEIGHT;
+        const rectW = pad * 2 + textW + logoW;
+        // Grow the plate so the (square) logo fits within it.
+        const rectH = showLogo ? Math.max(LABEL_HEIGHT, logoSize + 2) : LABEL_HEIGHT;
 
         // Default: centred plate above the plane. On-ground uses the short side-view
         // icon, so the label sits lower (closer to it). For the routed plane (selected
@@ -895,21 +998,19 @@ export class MarkerLayer {
         ctx.strokeStyle = selected ? "#22d3ee" : "rgba(15,23,42,0.22)";
         ctx.stroke();
 
-        let textX = left + pad;
-        if (showLogo && logo) {
-            ctx.drawImage(logo, left + pad, cy - logoSize / 2, logoSize, logoSize);
-            textX += logoSize + gap;
-        } else if (showLogo) {
-            textX += logoSize + gap;
-        }
-
+        // Registration number first, then the logo to its right.
+        const textX = left + pad;
         ctx.save();
         ctx.beginPath();
-        ctx.rect(textX, top, rectW - (textX - left) - pad, rectH);
+        ctx.rect(textX, top, textW, rectH);
         ctx.clip();
         ctx.fillStyle = "#111827";
         ctx.fillText(text, textX, cy + 0.5);
         ctx.restore();
+
+        if (showLogo && logo) {
+            ctx.drawImage(logo, textX + textW + gap, cy - logoSize / 2, logoSize, logoSize);
+        }
 
         return { x0: left, y0: top, x1: left + rectW, y1: top + rectH };
     }

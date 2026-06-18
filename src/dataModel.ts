@@ -21,6 +21,13 @@ export interface AirportInfo {
     country?: string;
 }
 
+/** One flown-path sample: coordinates and an optional timestamp (epoch ms). */
+export interface FlownPoint {
+    lat: number;
+    lon: number;
+    t: number | null;
+}
+
 export interface AircraftPoint {
     index: number;
     id: string;
@@ -47,8 +54,8 @@ export interface AircraftPoint {
     departureInfo?: AirportInfo;
     /** arrival airport name/city/country (for the airport label) */
     arrivalInfo?: AirportInfo;
-    /** already-flown path as [lat, lon] pairs (parsed from the Flown path field) */
-    flown?: [number, number][];
+    /** already-flown path samples (parsed from the Flown path field), sorted by time */
+    flown?: FlownPoint[];
     /** heading in degrees clockwise from north; always computed (0 when unknown) */
     heading: number;
     /** true when Flight status is "on the ground" (route/origin hidden, nose east) */
@@ -114,12 +121,32 @@ function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number
     return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
 }
 
+/** Parse a timestamp token: epoch ms (13 digits), epoch s (10 digits), or a date string. */
+function parseTimestamp(raw: string | undefined): number | null {
+    if (raw == null) {
+        return null;
+    }
+    const t = String(raw).trim();
+    if (!t) {
+        return null;
+    }
+    if (/^\d{13}$/.test(t)) {
+        return Number(t);
+    }
+    if (/^\d{10}$/.test(t)) {
+        return Number(t) * 1000;
+    }
+    const p = Date.parse(t);
+    return Number.isFinite(p) ? p : null;
+}
+
 /**
- * Parse the Flown path field into [lat, lon] pairs. Accepts a JSON array
- * (`[[lat,lon],...]` or `[{lat,lng},...]`) or a delimited string where pairs are
- * separated by `;`/`|` and the two numbers by comma/space (e.g. "55.7,37.6;56,38").
+ * Parse the Flown path field into samples. Accepts a JSON array
+ * (`[[lat,lon,ts?],...]` or `[{lat,lng,t?},...]`) or a delimited string where samples
+ * are separated by `;`/`|` and fields by comma: `lat,lon[,timestamp]` (the optional
+ * timestamp may be a date/time string or epoch). Samples are returned sorted by time.
  */
-function parseFlownPath(value: PrimitiveValue | undefined): [number, number][] {
+function parseFlownPath(value: PrimitiveValue | undefined): FlownPoint[] {
     if (value == null) {
         return [];
     }
@@ -127,7 +154,7 @@ function parseFlownPath(value: PrimitiveValue | undefined): [number, number][] {
     if (!s) {
         return [];
     }
-    const out: [number, number][] = [];
+    const out: FlownPoint[] = [];
     if (s[0] === "[" || s[0] === "{") {
         try {
             const arr = JSON.parse(s);
@@ -136,33 +163,43 @@ function parseFlownPath(value: PrimitiveValue | undefined): [number, number][] {
                     if (Array.isArray(el) && el.length >= 2) {
                         const a = Number(el[0]);
                         const b = Number(el[1]);
+                        const t = el.length >= 3 ? parseTimestamp(String(el[2])) : null;
                         if (Number.isFinite(a) && Number.isFinite(b)) {
-                            out.push([a, b]);
+                            out.push({ lat: a, lon: b, t });
                         }
                     } else if (el && typeof el === "object") {
                         const rec = el as Record<string, unknown>;
                         const a = Number(rec.lat ?? rec.latitude ?? rec.y);
                         const b = Number(rec.lon ?? rec.lng ?? rec.longitude ?? rec.x);
+                        const tv = rec.t ?? rec.time ?? rec.timestamp ?? rec.ts;
+                        const t = tv != null ? parseTimestamp(String(tv)) : null;
                         if (Number.isFinite(a) && Number.isFinite(b)) {
-                            out.push([a, b]);
+                            out.push({ lat: a, lon: b, t });
                         }
                     }
                 }
-                return out;
             }
         } catch {
             // fall through to delimited parsing
         }
-    }
-    for (const part of s.split(/[;|]/)) {
-        const nums = part
-            .trim()
-            .split(/[\s,]+/)
-            .map(Number)
-            .filter((n) => Number.isFinite(n));
-        if (nums.length >= 2) {
-            out.push([nums[0], nums[1]]);
+    } else {
+        for (const part of s.split(/[;|]/)) {
+            const fields = part.includes(",") ? part.split(",") : part.trim().split(/\s+/);
+            if (fields.length < 2) {
+                continue;
+            }
+            const a = Number(fields[0]);
+            const b = Number(fields[1]);
+            if (!Number.isFinite(a) || !Number.isFinite(b)) {
+                continue;
+            }
+            const t = fields.length >= 3 ? parseTimestamp(fields.slice(2).join(",")) : null;
+            out.push({ lat: a, lon: b, t });
         }
+    }
+    // Chronological order when timestamps are present (keeps original order otherwise).
+    if (out.length > 1 && out.every((p) => p.t != null)) {
+        out.sort((p, q) => (p.t as number) - (q.t as number));
     }
     return out;
 }
@@ -175,10 +212,10 @@ function parseFlownPath(value: PrimitiveValue | undefined): [number, number][] {
 function computeHeading(
     lat: number,
     lon: number,
-    flown: [number, number][],
+    flown: FlownPoint[],
     arrival: [number, number] | undefined
 ): number {
-    const track: [number, number][] = [...flown, [lat, lon]];
+    const track: [number, number][] = [...flown.map((f) => [f.lat, f.lon] as [number, number]), [lat, lon]];
     for (let i = track.length - 1; i > 0; i--) {
         const [la2, lo2] = track[i];
         const [la1, lo1] = track[i - 1];
