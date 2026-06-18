@@ -1244,6 +1244,19 @@
         }
       }
     },
+    "timelapse": {
+      "displayName": "Timeline",
+      "displayNameKey": "TimelapseCard",
+      "properties": {
+        "seconds": {
+          "displayName": "Full timelapse seconds (at 1x)",
+          "displayNameKey": "TimelapseSeconds",
+          "type": {
+            "numeric": true
+          }
+        }
+      }
+    },
     "legend": {
       "displayName": "Legend",
       "displayNameKey": "LegendCard",
@@ -1418,6 +1431,13 @@
         "nearbyDistance": {
           "displayName": "Nearby distance (km)",
           "displayNameKey": "NearbyDistance",
+          "type": {
+            "numeric": true
+          }
+        },
+        "groundRadius": {
+          "displayName": "On-ground radius (km)",
+          "displayNameKey": "GroundRadius",
           "type": {
             "numeric": true
           }

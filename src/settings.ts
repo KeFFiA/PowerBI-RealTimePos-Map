@@ -156,6 +156,13 @@ export class BehaviorCard extends Card {
         value: 250,
     });
 
+    groundRadius = new NumUpDown({
+        name: "groundRadius",
+        displayName: "On-ground radius (km)",
+        displayNameKey: "GroundRadius",
+        value: 10,
+    });
+
     slices = [
         this.cluster,
         this.clusterRadius,
@@ -163,7 +170,24 @@ export class BehaviorCard extends Card {
         this.clusterAutoColor,
         this.clusterSaturation,
         this.nearbyDistance,
+        this.groundRadius,
     ];
+}
+
+/** "timelapse" object — playback options for the timeline scrubber. */
+export class TimelapseCard extends Card {
+    name = "timelapse";
+    displayName = "Timeline";
+    displayNameKey = "TimelapseCard";
+
+    seconds = new NumUpDown({
+        name: "seconds",
+        displayName: "Full timelapse seconds (at 1x)",
+        displayNameKey: "TimelapseSeconds",
+        value: 15,
+    });
+
+    slices = [this.seconds];
 }
 
 export const LEGEND_POSITION_ITEMS: IEnumMember[] = [
@@ -328,7 +352,17 @@ export class VisualSettingsModel extends Model {
     behavior = new BehaviorCard();
     routes = new RoutesCard();
     legend = new LegendCard();
+    timelapse = new TimelapseCard();
     groupColor = new GroupColorCard();
     objectMarker = new ObjectMarkerCard();
-    cards = [this.marker, this.map, this.behavior, this.routes, this.legend, this.groupColor, this.objectMarker];
+    cards = [
+        this.marker,
+        this.map,
+        this.behavior,
+        this.routes,
+        this.legend,
+        this.timelapse,
+        this.groupColor,
+        this.objectMarker,
+    ];
 }

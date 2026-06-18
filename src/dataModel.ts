@@ -110,6 +110,18 @@ function makeAirportInfo(
     return { name, city, country };
 }
 
+/** Great-circle distance in kilometres. */
+function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const toRad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const h =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 /** Bearing in degrees clockwise from north, from point a to point b. */
 function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const toRad = Math.PI / 180;
@@ -307,6 +319,7 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
     });
 
     const defaultColor = settings.marker.color.value.value;
+    const groundRadiusKm = Math.max(0, Number(settings.behavior.groundRadius.value) || 10);
     const count = categoryCol.values.length;
     const points: AircraftPoint[] = [];
 
@@ -351,7 +364,16 @@ export function transform(dataView: DataView | undefined, host: IVisualHost, set
             Number.isFinite(arrLat) && Number.isFinite(arrLon) ? [arrLat, arrLon] : undefined;
         const flown = flownCol ? parseFlownPath(flownCol.values[i]) : [];
         const statusStr = readStr(statusCol, i);
-        const onGround = !!statusStr && statusStr.trim().toLowerCase() === "on the ground";
+        const statusOnGround = !!statusStr && statusStr.trim().toLowerCase() === "on the ground";
+        // An aircraft is "on the ground" (parked, side icon) when it sits at an
+        // airport — within GROUND_RADIUS_KM of its departure OR arrival point. So it
+        // is parked before departing and again once it has landed; anywhere in
+        // between (en route) it is in flight. With no airport coordinates we fall back
+        // to the Flight status field.
+        const nearAirport = (c: [number, number] | undefined): boolean =>
+            !!c && distanceKm(lat, lon, c[0], c[1]) <= groundRadiusKm;
+        const onGround =
+            departure || arrival ? nearAirport(departure) || nearAirport(arrival) : statusOnGround;
         // On the ground: nose east, no route/origin (handled in renderer).
         const heading = onGround ? 90 : computeHeading(lat, lon, flown, arrival);
         const departureInfo = makeAirportInfo(

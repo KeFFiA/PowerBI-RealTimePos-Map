@@ -370,14 +370,21 @@ export class MarkerLayer {
         if (idx < 0) {
             return null; // before this aircraft's first sample
         }
-        const cur = timed[idx];
-        let heading = point.heading;
-        if (idx > 0) {
-            heading = bearingDeg(timed[idx - 1].lat, timed[idx - 1].lon, cur.lat, cur.lon);
-        } else if (timed.length > 1) {
-            heading = bearingDeg(cur.lat, cur.lon, timed[1].lat, timed[1].lon);
+        const a = timed[idx];
+        const b = timed[idx + 1]; // exists because T < last sample's time
+        const span = (b.t as number) - (a.t as number);
+        const frac = span > 0 ? Math.max(0, Math.min(1, (T - (a.t as number)) / span)) : 0;
+        // Interpolate latitude linearly and longitude along the shorter arc.
+        let dLon = b.lon - a.lon;
+        if (dLon > 180) {
+            dLon -= 360;
+        } else if (dLon < -180) {
+            dLon += 360;
         }
-        return { lat: cur.lat, lon: cur.lon, heading };
+        const lat = a.lat + (b.lat - a.lat) * frac;
+        let lon = a.lon + dLon * frac;
+        lon = (((lon + 180) % 360) + 360) % 360 - 180;
+        return { lat, lon, heading: bearingDeg(a.lat, a.lon, b.lat, b.lon) };
     }
 
     public clear(): void {
@@ -671,7 +678,7 @@ export class MarkerLayer {
                 ctx.rotate(rad);
                 if (selected) {
                     ctx.save();
-                    ctx.shadowColor = "rgba(34,211,238,0.95)";
+                    ctx.shadowColor = "rgba(212,0,0,0.95)";
                     ctx.shadowBlur = 10;
                     ctx.drawImage(img, -symW / 2, -size / 2, symW, size);
                     ctx.restore();
@@ -926,7 +933,7 @@ export class MarkerLayer {
         const ctx = this.ctx;
         if (selected) {
             ctx.save();
-            ctx.shadowColor = "rgba(34,211,238,0.95)";
+            ctx.shadowColor = "rgba(212,0,0,0.95)";
             ctx.shadowBlur = 10;
         }
         ctx.beginPath();
@@ -995,7 +1002,7 @@ export class MarkerLayer {
         ctx.fillStyle = "rgba(255,255,255,0.96)";
         ctx.fill();
         ctx.lineWidth = 1;
-        ctx.strokeStyle = selected ? "#22d3ee" : "rgba(15,23,42,0.22)";
+        ctx.strokeStyle = selected ? "#d40000" : "rgba(15,23,42,0.22)";
         ctx.stroke();
 
         // Registration number first, then the logo to its right.
