@@ -1235,6 +1235,13 @@
             ]
           }
         },
+        "followTheme": {
+          "displayName": "Follow report theme",
+          "displayNameKey": "FollowTheme",
+          "type": {
+            "bool": true
+          }
+        },
         "autoZoom": {
           "displayName": "Auto zoom to points",
           "displayNameKey": "AutoZoom",

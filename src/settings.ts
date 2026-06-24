@@ -98,6 +98,15 @@ export class MapCard extends Card {
         value: MAP_STYLE_ITEMS[0], // dark
     });
 
+    // When on, the basemap (and chrome background) follow the report theme — dark
+    // theme → dark basemap, light → light — and the manual "style" is ignored.
+    followTheme = new ToggleSwitch({
+        name: "followTheme",
+        displayName: "Follow report theme",
+        displayNameKey: "FollowTheme",
+        value: true,
+    });
+
     autoZoom = new ToggleSwitch({
         name: "autoZoom",
         displayName: "Auto zoom to points",
@@ -105,7 +114,7 @@ export class MapCard extends Card {
         value: true,
     });
 
-    slices = [this.style, this.autoZoom];
+    slices = [this.style, this.followTheme, this.autoZoom];
 }
 
 /** "behavior" object — marker clustering and selection-distance filtering. */

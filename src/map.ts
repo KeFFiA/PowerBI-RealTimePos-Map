@@ -36,11 +36,14 @@ const TILE_URLS: Record<MapStyle, string> = {
 
 export class MapController {
     private readonly map: L.Map;
+    private readonly container: HTMLElement;
     private readonly layers: Partial<Record<MapStyle, L.TileLayer>> = {};
     private currentStyle: MapStyle | null = null;
     private styleButtons: Map<MapStyle, HTMLButtonElement> = new Map();
+    private styleControl: HTMLElement | null = null;
 
     constructor(container: HTMLElement) {
+        this.container = container;
         container.classList.add("aircraft-map");
         this.map = L.map(container, {
             center: [20, 0],
@@ -63,6 +66,19 @@ export class MapController {
 
     public getMap(): L.Map {
         return this.map;
+    }
+
+    /** Paint the map container background (shown around/behind tiles and outside the
+     *  world bounds) — used to match the report theme so framing blends in. */
+    public applyBackground(color: string): void {
+        this.container.style.background = color;
+    }
+
+    /** Hide the on-map Dark/Light switcher when the theme drives the basemap. */
+    public setStyleControlVisible(visible: boolean): void {
+        if (this.styleControl) {
+            this.styleControl.style.display = visible ? "" : "none";
+        }
     }
 
     public setStyle(style: MapStyle): void {
@@ -88,6 +104,7 @@ export class MapController {
     /** Builds the on-map style switcher (Dark / Light only) inside the given root element. */
     public buildStyleControl(root: HTMLElement, labels: StyleSwitcherLabels, onChange: (style: MapStyle) => void): void {
         const control = L.DomUtil.create("div", "aircraft-map-style-control", root);
+        this.styleControl = control;
         L.DomEvent.disableClickPropagation(control);
         L.DomEvent.disableScrollPropagation(control);
         const defs: Array<[MapStyle, string]> = [

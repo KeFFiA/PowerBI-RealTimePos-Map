@@ -26,12 +26,32 @@ import { MapController, MapStyle } from "./map";
 import { MarkerLayer, ClusterTooltipGroup } from "./markers";
 import { AreaSelection } from "./selection";
 
+/** sRGB relative-luminance test — true when a hex color reads as "dark". */
+function isDarkColor(hex: string): boolean {
+    const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
+    if (!m) {
+        return true;
+    }
+    let h = m[1];
+    if (h.length === 3) {
+        h = h
+            .split("")
+            .map((c) => c + c)
+            .join("");
+    }
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
+}
+
 export class Visual implements IVisual {
     private readonly host: IVisualHost;
     private readonly selectionManager: ISelectionManager;
     private readonly localization: ILocalizationManager;
     private readonly formattingService: FormattingSettingsService;
 
+    private rootElement!: HTMLElement;
     private readonly mapElement: HTMLDivElement;
     private readonly landingElement: HTMLDivElement;
     private readonly tooltipElement: HTMLDivElement;
@@ -83,6 +103,7 @@ export class Visual implements IVisual {
 
         const root = options.element;
         root.classList.add("aircraft-map-root");
+        this.rootElement = root;
 
         this.mapElement = document.createElement("div");
         root.appendChild(this.mapElement);
@@ -714,6 +735,41 @@ export class Visual implements IVisual {
         });
     }
 
+    /**
+     * Sync the basemap + chrome background with the report theme. With "Follow report
+     * theme" on (default), the host palette's background luminance picks the dark vs
+     * light basemap and the visual background is painted to match the page — so the
+     * map blends into the portal's light/dark canvas (sea tone follows the theme).
+     * With it off, the manual "Map style" dropdown wins and the on-map switcher shows.
+     */
+    private applyThemeSync(): void {
+        const palette = this.host.colorPalette as unknown as {
+            background?: { value?: string };
+            foreground?: { value?: string };
+        };
+        const bgColor = palette?.background?.value;
+        const fgColor = palette?.foreground?.value;
+        const followTheme = this.settings.map.followTheme.value;
+
+        const style: MapStyle =
+            followTheme && bgColor
+                ? isDarkColor(bgColor)
+                    ? "dark"
+                    : "light"
+                : (this.settings.map.style.value.value as MapStyle);
+
+        if (bgColor) {
+            this.rootElement.style.background = bgColor;
+            this.rootElement.style.setProperty("--aircraft-background", bgColor);
+            this.mapController.applyBackground(bgColor);
+        }
+        if (fgColor) {
+            this.rootElement.style.setProperty("--aircraft-foreground", fgColor);
+        }
+        this.mapController.setStyleControlVisible(!followTheme);
+        this.mapController.setStyle(style);
+    }
+
     public update(options: VisualUpdateOptions): void {
         // Hide any open tooltip up front: on a data refresh the hovered marker is
         // recreated, so its mouseout never fires and the tooltip would otherwise
@@ -731,6 +787,7 @@ export class Visual implements IVisual {
         this.pointsByIndex = new Map(this.points.map((p) => [p.index, p]));
         this.updateLegend();
         this.updateTimelapse();
+        this.applyThemeSync();
 
         const hasData = this.points.length > 0;
         this.landingElement.style.display = hasData ? "none" : "flex";
@@ -740,7 +797,6 @@ export class Visual implements IVisual {
             return;
         }
 
-        this.mapController.setStyle(this.settings.map.style.value.value as MapStyle);
         this.mapController.resize();
 
         this.markerLayer.render(this.points, this.settings, {

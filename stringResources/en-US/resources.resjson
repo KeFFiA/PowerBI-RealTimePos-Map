@@ -23,6 +23,7 @@
     "ShowAirlineLogo": "Show airline logo",
     "LogoSize": "Logo size",
     "AutoZoom": "Auto zoom to points",
+    "FollowTheme": "Follow report theme",
     "Behavior": "Clustering & filtering",
     "Cluster": "Cluster dense areas",
     "ClusterRadius": "Cluster radius (px)",
