@@ -649,9 +649,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   height: 100%;
   border: 0;
   outline: 0;
-  /* Map backdrop is set in JS to follow the basemap (dark/light), never white;
-     base value here is the dark sea tone. */
-  background: #0a0d12;
+  /* Ocean is transparent: only the land canvas paints the continents. */
+  background: transparent;
 }
 /* Leaflet defaults to a light (#ddd) container background and a 1px outline-offset
    — both can bleed a light edge under a transparent embed. Neutralise them. */
@@ -660,6 +659,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
   background: transparent;
   outline: 0;
   outline-offset: 0;
+}
+/* Land continents canvas: purely visual, sits below the markers. */
+.aircraft-land-layer {
+  pointer-events: none;
 }
 .aircraft-map .leaflet-control-zoom {
   border: 0;

@@ -1000,7 +1000,15 @@ export class MarkerLayer {
         const logoSrc = point.logoUrl;
         const showLogo = settings.marker.showAirlineLogo.value && !!logoSrc;
         const logo = showLogo ? this.getLogoImage(logoSrc) : null;
-        const logoW = showLogo ? logoSize + gap : 0;
+        // Keep the logo's aspect ratio: fit its natural shape into a `logoSize`-tall box
+        // (capped so very wide logos don't blow out the label). Until the image loads we
+        // reserve a square; the redraw on load swaps in the true proportions.
+        let logoDrawW = logoSize;
+        const logoDrawH = logoSize;
+        if (logo && logo.naturalWidth > 0 && logo.naturalHeight > 0) {
+            logoDrawW = clamp(logoSize * (logo.naturalWidth / logo.naturalHeight), 6, logoSize * 2.6);
+        }
+        const logoW = showLogo ? logoDrawW + gap : 0;
 
         ctx.font = `700 8px "Segoe UI", Arial, sans-serif`;
         ctx.textBaseline = "middle";
@@ -1046,7 +1054,7 @@ export class MarkerLayer {
         ctx.restore();
 
         if (showLogo && logo) {
-            ctx.drawImage(logo, textX + textW + gap, cy - logoSize / 2, logoSize, logoSize);
+            ctx.drawImage(logo, textX + textW + gap, cy - logoDrawH / 2, logoDrawW, logoDrawH);
         }
 
         return { x0: left, y0: top, x1: left + rectW, y1: top + rectH };

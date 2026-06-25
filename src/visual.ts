@@ -758,19 +758,17 @@ export class Visual implements IVisual {
                     : "light"
                 : (this.settings.map.style.value.value as MapStyle);
 
-        // The root stays transparent (CSS) so that when the portal embeds us with a
-        // transparent background — e.g. fullscreen over a dark app canvas — no white/
-        // light frame or letterbox is ever painted around the visual. Only the map
-        // container gets a backdrop, and it follows the *basemap* (dark/light) rather
-        // than the raw palette background (which can be white in a transparent embed),
-        // so it can never bleed white at the tile edges.
+        // The ocean is transparent and the root paints no backdrop, so a transparent
+        // embed (e.g. portal fullscreen over a dark app canvas) never shows a white/
+        // light frame or letterbox — only the continents (in the theme land colour)
+        // and the portal's own background show through.
         if (bgColor) {
             this.rootElement.style.setProperty("--aircraft-background", bgColor);
         }
         if (fgColor) {
             this.rootElement.style.setProperty("--aircraft-foreground", fgColor);
         }
-        this.mapController.applyBackground(style === "dark" ? "#0a0d12" : "#e8eaed");
+        this.mapController.applyBackground("transparent");
         this.mapController.setStyleControlVisible(!followTheme);
         this.mapController.setStyle(style);
     }

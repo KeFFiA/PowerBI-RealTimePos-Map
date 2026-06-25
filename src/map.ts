@@ -1,11 +1,13 @@
 /**
- * Leaflet map wrapper: owns the map instance, the four base layers recovered from
- * the original visual (Carto dark/light/voyager + OpenStreetMap), and the on-map
- * style switcher (.aircraft-map-style-control).
+ * Leaflet map wrapper. The basemap is no longer raster tiles: the ocean is transparent
+ * and only the continents are painted (see LandLayer), in a theme colour. Dark/Light is
+ * just the land fill tone. Vertical panning/zoom is bounded so no empty bands appear
+ * above/below the world, while horizontal scrolling stays infinite.
  */
 import * as L from "leaflet";
 
 import { AircraftPoint } from "./dataModel";
+import { LandLayer, LandColors } from "./landLayer";
 
 export type MapStyle = "dark" | "light" | "osm" | "voyager";
 
@@ -16,28 +18,33 @@ export interface StyleSwitcherLabels {
     voyager: string;
 }
 
-/** Single-world extent — used to cap how far you can zoom out. */
-const WORLD_BOUNDS = L.latLngBounds([
-    [-85.05, -180],
-    [85.05, 180],
+const WORLD_LAT = 85.05;
+// Latitude is bounded to the world; longitude is given a huge span so horizontal
+// scrolling is effectively infinite while the map can never be dragged to reveal
+// empty space above or below the continents.
+const PAN_BOUNDS = L.latLngBounds([
+    [-WORLD_LAT, -1e6],
+    [WORLD_LAT, 1e6],
+]);
+// Single-world extent used to derive the minimum zoom (so the world always covers
+// the viewport vertically — no empty bands at the most-zoomed-out level).
+const FIT_BOUNDS = L.latLngBounds([
+    [-WORLD_LAT, -180],
+    [WORLD_LAT, 180],
 ]);
 
-const CARTO_SUBDOMAINS = "abcd";
-const CARTO_ATTRIBUTION =
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
-const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-
-const TILE_URLS: Record<MapStyle, string> = {
-    light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    voyager: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    osm: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+// Land tones: in light mode the land takes the colour the ocean used to have in the
+// light basemap, in dark mode the dark-basemap ocean tone. The ocean is transparent.
+// Borders and labels are picked to contrast against the land fill of each theme.
+const LAND_PALETTE: Record<"dark" | "light", LandColors> = {
+    dark: { land: "#2a2f37", border: "#525c6b", label: "#eef2f7" },
+    light: { land: "#c9d2d8", border: "#7c8794", label: "#1b2531" },
 };
 
 export class MapController {
     private readonly map: L.Map;
     private readonly container: HTMLElement;
-    private readonly layers: Partial<Record<MapStyle, L.TileLayer>> = {};
+    private readonly land: LandLayer;
     private currentStyle: MapStyle | null = null;
     private styleButtons: Map<MapStyle, HTMLButtonElement> = new Map();
     private styleControl: HTMLElement | null = null;
@@ -49,55 +56,41 @@ export class MapController {
             center: [20, 0],
             zoom: 2,
             zoomControl: true,
-            attributionControl: true,
+            attributionControl: false,
             // Horizontal wrap stays on (infinite sideways scroll), but worldCopyJump
-            // is off so markers don't teleport between copies — instead the marker
-            // layer draws a copy of each plane in every visible world (see MarkerLayer).
+            // is off so markers don't teleport between copies — the marker and land
+            // layers draw a copy of their content in every visible world instead.
             worldCopyJump: false,
             preferCanvas: false,
+            maxBounds: PAN_BOUNDS,
+            maxBoundsViscosity: 1.0,
         });
-        // Strip Leaflet's default attribution prefix (it carries the Ukrainian
-        // flag since Leaflet 1.8). Tile attribution (OSM/CARTO) is kept as the
-        // providers' licenses require it.
-        this.map.attributionControl.setPrefix(false);
+        this.land = new LandLayer(this.map, LAND_PALETTE.dark);
         this.setStyle("dark");
         this.applyMinZoom();
+        this.map.on("resize", () => this.applyMinZoom());
     }
 
     public getMap(): L.Map {
         return this.map;
     }
 
-    /** Paint the map container background (shown around/behind tiles and outside the
-     *  world bounds) — used to match the report theme so framing blends in. */
+    /** Ocean is transparent; the container only ever takes a transparent backdrop. */
     public applyBackground(color: string): void {
-        this.container.style.background = color;
+        this.container.style.background = color || "transparent";
     }
 
-    /** Hide the on-map Dark/Light switcher when the theme drives the basemap. */
+    /** Hide the on-map Dark/Light switcher when the theme drives the land colour. */
     public setStyleControlVisible(visible: boolean): void {
         if (this.styleControl) {
             this.styleControl.style.display = visible ? "" : "none";
         }
     }
 
+    /** Dark/Light now only sets the land fill colour. */
     public setStyle(style: MapStyle): void {
-        if (this.currentStyle !== style) {
-            if (this.currentStyle && this.layers[this.currentStyle]) {
-                this.map.removeLayer(this.layers[this.currentStyle]!);
-            }
-            if (!this.layers[style]) {
-                const isOsm = style === "osm";
-                this.layers[style] = L.tileLayer(TILE_URLS[style], {
-                    subdomains: isOsm ? "abc" : CARTO_SUBDOMAINS,
-                    attribution: isOsm ? OSM_ATTRIBUTION : CARTO_ATTRIBUTION,
-                    detectRetina: true,
-                    maxZoom: 19,
-                });
-            }
-            this.layers[style]!.addTo(this.map);
-            this.currentStyle = style;
-        }
+        this.currentStyle = style;
+        this.land.setColors(style === "dark" ? LAND_PALETTE.dark : LAND_PALETTE.light);
         this.styleButtons.forEach((btn, key) => btn.classList.toggle("active", key === this.currentStyle));
     }
 
@@ -139,9 +132,12 @@ export class MapController {
         this.applyMinZoom();
     }
 
-    /** Cap zoom-out so the world can't be zoomed smaller than the viewport. */
+    /**
+     * Cap zoom-out so the world always covers the viewport vertically (the view fits
+     * *inside* the world bounds), which prevents empty bands above/below the continents.
+     */
     private applyMinZoom(): void {
-        const z = this.map.getBoundsZoom(WORLD_BOUNDS, false);
+        const z = this.map.getBoundsZoom(FIT_BOUNDS, true);
         if (Number.isFinite(z) && z > 0) {
             this.map.setMinZoom(Math.min(z, 19));
         }
