@@ -165,13 +165,6 @@ export class BehaviorCard extends Card {
         value: 250,
     });
 
-    groundRadius = new NumUpDown({
-        name: "groundRadius",
-        displayName: "On-ground radius (km)",
-        displayNameKey: "GroundRadius",
-        value: 10,
-    });
-
     slices = [
         this.cluster,
         this.clusterRadius,
@@ -179,7 +172,6 @@ export class BehaviorCard extends Card {
         this.clusterAutoColor,
         this.clusterSaturation,
         this.nearbyDistance,
-        this.groundRadius,
     ];
 }
 

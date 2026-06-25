@@ -25,6 +25,10 @@ export interface SelectionCallbacks {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+// Longitude offsets (degrees) for the adjacent world copies, so a shape drawn after
+// the map has wrapped sideways still matches planes whose longitude is in [-180,180].
+const WORLD_SHIFTS = [0, -360, 360];
+
 /** Toolbar icon paths recovered 1:1 from the original bundle. */
 const ICON_PATHS: Record<string, string> = {
     pan:
@@ -183,15 +187,20 @@ export class AreaSelection {
     }
 
     private onMouseMove(e: L.LeafletMouseEvent): void {
-        if (!this.dragging) {
+        if (this.dragging) {
+            if (this.mode === "rectangle" && this.start) {
+                const bounds = L.latLngBounds(this.start, e.latlng);
+                this.drawRectangle(bounds);
+            } else if (this.mode === "lasso") {
+                this.path.push(e.latlng);
+                this.drawPolygon(this.path);
+            }
             return;
         }
-        if (this.mode === "rectangle" && this.start) {
-            const bounds = L.latLngBounds(this.start, e.latlng);
-            this.drawRectangle(bounds);
-        } else if (this.mode === "lasso") {
-            this.path.push(e.latlng);
-            this.drawPolygon(this.path);
+        // Polygon: rubber-band the edge from the last placed vertex to the cursor so
+        // the shape being drawn is always visible (committed vertices stay in path).
+        if (this.mode === "polygon" && this.path.length >= 1) {
+            this.drawPolygon([...this.path, e.latlng]);
         }
     }
 
@@ -219,6 +228,20 @@ export class AreaSelection {
         if (this.mode !== "polygon") {
             return;
         }
+        // Clicking back on (or near) the first vertex closes and commits the polygon —
+        // a reliable alternative to double-clicking.
+        if (this.path.length >= 3 && this.nearVertex(this.path[0], e.latlng)) {
+            this.commitPolygon(this.path);
+            this.resetTransient();
+            return;
+        }
+        // Ignore a click that lands on the previous vertex. This also collapses the two
+        // `click` events Leaflet fires as part of a double-click into a single vertex,
+        // so finishing with a double-click no longer leaves stray duplicate points.
+        const last = this.path[this.path.length - 1];
+        if (last && this.nearVertex(last, e.latlng, 8)) {
+            return;
+        }
         this.path.push(e.latlng);
         this.drawPolygon(this.path);
     }
@@ -228,10 +251,20 @@ export class AreaSelection {
             return;
         }
         L.DomEvent.stop(e.originalEvent);
+        // Drop any trailing near-duplicate vertices the double-click's own clicks added
+        // before committing, so the finished polygon matches what the user drew.
+        while (this.path.length >= 2 && this.nearVertex(this.path[this.path.length - 1], this.path[this.path.length - 2], 8)) {
+            this.path.pop();
+        }
         if (this.path.length >= 3) {
             this.commitPolygon(this.path);
         }
         this.resetTransient();
+    }
+
+    /** True when two lat/lngs are within `px` screen pixels of each other. */
+    private nearVertex(a: L.LatLng, b: L.LatLng, px = 12): boolean {
+        return this.map.latLngToContainerPoint(a).distanceTo(this.map.latLngToContainerPoint(b)) <= px;
     }
 
     private removeLastVertex(): void {
@@ -243,14 +276,14 @@ export class AreaSelection {
 
     private commitBounds(bounds: L.LatLngBounds): void {
         const indices = this.points
-            .filter((p) => bounds.contains([p.latitude, p.longitude]))
+            .filter((p) => WORLD_SHIFTS.some((s) => bounds.contains([p.latitude, p.longitude + s])))
             .map((p) => p.index);
         this.callbacks.onSelect(indices, false);
     }
 
     private commitPolygon(path: L.LatLng[]): void {
         const indices = this.points
-            .filter((p) => pointInPolygon(L.latLng(p.latitude, p.longitude), path))
+            .filter((p) => WORLD_SHIFTS.some((s) => pointInPolygon(L.latLng(p.latitude, p.longitude + s), path)))
             .map((p) => p.index);
         this.callbacks.onSelect(indices, false);
     }

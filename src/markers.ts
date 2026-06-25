@@ -18,7 +18,6 @@ import * as L from "leaflet";
 import { AircraftPoint, AirportInfo } from "./dataModel";
 import { VisualSettingsModel, DEFAULT_AIRCRAFT_TYPE } from "./settings";
 import { AIRCRAFT_ICONS, AircraftIcon } from "./aircraftIcons";
-import { TEST_LOGO } from "./testLogo";
 
 /** Aircraft of one airline inside a hovered cluster. */
 export interface ClusterTooltipGroup {
@@ -387,6 +386,35 @@ export class MarkerLayer {
         return { lat, lon, heading: bearingDeg(a.lat, a.lon, b.lat, b.lon) };
     }
 
+    /**
+     * Whether to draw the aircraft with the on-ground (side / parked) icon.
+     *
+     * Live (no timelapse): purely the Flight status — every "on the ground" aircraft
+     * is parked. During timelapse the parked icon is shown only at the aircraft's
+     * last sample (its final point); at any earlier replayed moment it was still
+     * airborne, so it keeps the in-flight icon even though its latest status reads
+     * on-ground.
+     */
+    private displayOnGround(point: AircraftPoint): boolean {
+        if (!point.onGround) {
+            return false;
+        }
+        return this.timelapseTime === null || this.isAtLastSample(point);
+    }
+
+    /** True when the current timelapse time is at/after the aircraft's last timed sample. */
+    private isAtLastSample(point: AircraftPoint): boolean {
+        const T = this.timelapseTime;
+        if (T === null || !point.flown || !point.flown.length) {
+            return true;
+        }
+        const timed = point.flown.filter((f) => f.t != null);
+        if (!timed.length) {
+            return true;
+        }
+        return T >= (timed[timed.length - 1].t as number);
+    }
+
     public clear(): void {
         this.points = [];
         this.selectedIndices = null;
@@ -654,9 +682,10 @@ export class MarkerLayer {
         const size = clamp(Number(settings.marker.size.value) || 50, 18, 90);
         const symW = Math.round(1.32 * size);
         const shapeMode = settings.marker.shape.value.value as string;
+        const onGround = this.displayOnGround(point);
         const icon =
             shapeMode === "aircraft"
-                ? point.onGround
+                ? onGround
                     ? SIDE_VIEW_ICON
                     : resolveAircraftShape(point.aircraftType) || resolveAircraftShape(DEFAULT_AIRCRAFT_TYPE)
                 : null;
@@ -672,7 +701,7 @@ export class MarkerLayer {
             if (img) {
                 // Heading rotation for airborne (nose-up icons); on-ground uses the
                 // side-view icon as-is (already nose-east), so no rotation.
-                const rad = point.onGround ? 0 : ((inst.heading || 0) * Math.PI) / 180;
+                const rad = onGround ? 0 : ((inst.heading || 0) * Math.PI) / 180;
                 ctx.save();
                 ctx.translate(x, y);
                 ctx.rotate(rad);
@@ -692,7 +721,7 @@ export class MarkerLayer {
             this.drawDot(x, y, size / 2, point.color, selected);
         }
 
-        const label = this.drawLabel(point, settings, x, y, size, selected);
+        const label = this.drawLabel(point, settings, x, y, size, selected, onGround);
         ctx.restore();
 
         const hitR = Math.max(10, (icon ? size * 0.45 : size / 2 + 2));
@@ -721,6 +750,7 @@ export class MarkerLayer {
      */
     private drawRoute(inst: Instance, settings: VisualSettingsModel): void {
         const point = inst.point;
+        const onGround = this.displayOnGround(point);
         const cfg = settings.routes;
         const lonShift = inst.lng - inst.lon0;
         const curLat = inst.lat;
@@ -736,7 +766,7 @@ export class MarkerLayer {
 
         // On the ground: no route line, no origin — show only the airport the plane
         // is currently at (the nearer of departure/arrival to its position).
-        if (point.onGround) {
+        if (onGround) {
             const [px, py] = toXY(curLat, curLon);
             let bestCoord: [number, number] | null = null;
             let bestInfo: AirportInfo | undefined;
@@ -955,7 +985,8 @@ export class MarkerLayer {
         x: number,
         y: number,
         size: number,
-        selected: boolean
+        selected: boolean,
+        onGround: boolean
     ): { x0: number; y0: number; x1: number; y1: number } | null {
         if (!settings.marker.showLabels.value) {
             return null;
@@ -965,9 +996,8 @@ export class MarkerLayer {
         const pad = 4;
         const gap = 3;
         const logoSize = clamp(Number(settings.marker.logoSize.value) || 18, 10, 36);
-        // Per-aircraft logo URL (from data) when available, else the hardcoded test
-        // logo for every aircraft during testing.
-        const logoSrc = point.logoUrl || TEST_LOGO;
+        // Per-aircraft airline logo URL (from the data role).
+        const logoSrc = point.logoUrl;
         const showLogo = settings.marker.showAirlineLogo.value && !!logoSrc;
         const logo = showLogo ? this.getLogoImage(logoSrc) : null;
         const logoW = showLogo ? logoSize + gap : 0;
@@ -985,7 +1015,7 @@ export class MarkerLayer {
         // / preview) offset it perpendicular to the heading so it clears the route line.
         let cx = x;
         let cy = y - size / 2 - rectH / 2;
-        if (point.onGround) {
+        if (onGround) {
             cy = y - size * 0.26 - rectH / 2;
         } else if (selected) {
             const h = ((point.heading || 0) * Math.PI) / 180;

@@ -758,14 +758,19 @@ export class Visual implements IVisual {
                     : "light"
                 : (this.settings.map.style.value.value as MapStyle);
 
+        // The root stays transparent (CSS) so that when the portal embeds us with a
+        // transparent background — e.g. fullscreen over a dark app canvas — no white/
+        // light frame or letterbox is ever painted around the visual. Only the map
+        // container gets a backdrop, and it follows the *basemap* (dark/light) rather
+        // than the raw palette background (which can be white in a transparent embed),
+        // so it can never bleed white at the tile edges.
         if (bgColor) {
-            this.rootElement.style.background = bgColor;
             this.rootElement.style.setProperty("--aircraft-background", bgColor);
-            this.mapController.applyBackground(bgColor);
         }
         if (fgColor) {
             this.rootElement.style.setProperty("--aircraft-foreground", fgColor);
         }
+        this.mapController.applyBackground(style === "dark" ? "#0a0d12" : "#e8eaed");
         this.mapController.setStyleControlVisible(!followTheme);
         this.mapController.setStyle(style);
     }
@@ -915,7 +920,7 @@ export class Visual implements IVisual {
 
     private showTooltip(point: AircraftPoint, position: { x: number; y: number }): void {
         const rows = point.tooltips.length ? point.tooltips : [];
-        this.renderTooltip(point.label || point.id || "", rows, position);
+        this.renderTooltip(point.label || point.id || "", rows, position, point.logoUrl);
     }
 
     /** Cluster hover tooltip: one row per airline (count) listing its aircraft. */
@@ -942,11 +947,22 @@ export class Visual implements IVisual {
     private renderTooltip(
         title: string,
         rows: { displayName: string; value: string }[],
-        position: { x: number; y: number }
+        position: { x: number; y: number },
+        logoUrl?: string
     ): void {
         const el = this.tooltipElement;
         while (el.firstChild) {
             el.removeChild(el.firstChild);
+        }
+        // Airline logo, pinned to the top-right corner of the tooltip.
+        el.classList.toggle("has-logo", !!logoUrl);
+        if (logoUrl) {
+            const logo = document.createElement("img");
+            logo.className = "aircraft-custom-tooltip-logo";
+            logo.crossOrigin = "anonymous";
+            logo.alt = "";
+            logo.src = logoUrl;
+            el.appendChild(logo);
         }
         if (title) {
             const t = document.createElement("div");

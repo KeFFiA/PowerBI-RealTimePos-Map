@@ -1441,13 +1441,6 @@
           "type": {
             "numeric": true
           }
-        },
-        "groundRadius": {
-          "displayName": "On-ground radius (km)",
-          "displayNameKey": "GroundRadius",
-          "type": {
-            "numeric": true
-          }
         }
       }
     }
